@@ -1,0 +1,5 @@
+{
+  "name": "Factory Production Tracker to deploy",
+  "description": "A web application to visualize manufacturing jobs and personnel assignments on a dynamic Kanban board. It provides both job-centric and personnel-centric views to track production flow and workload.",
+  "requestFramePermissions": []
+}
