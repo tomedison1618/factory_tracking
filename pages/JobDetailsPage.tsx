@@ -412,9 +412,8 @@ export const JobDetailsPage: React.FC<JobDetailsPageProps> = (props) => {
   } = props;
   
   const isManagerOrAdmin = currentUser.role === UserRole.MANAGER || currentUser.role === UserRole.ADMIN;
-  const isNewJobForManager = isManagerOrAdmin && jobAssignments.length === 0;
   
-  const [activeTab, setActiveTab] = useState(isNewJobForManager ? 'assignments' : 'overview');
+  const [activeTab, setActiveTab] = useState((isManagerOrAdmin && jobAssignments.length === 0) ? 'assignments' : 'overview');
   const [scrappingProduct, setScrappingProduct] = useState<Product | null>(null);
   const [isEditingPriority, setIsEditingPriority] = useState(false);
   
@@ -536,7 +535,7 @@ export const JobDetailsPage: React.FC<JobDetailsPageProps> = (props) => {
       <div className="border-b border-gray-700">
         <nav className="flex space-x-2">
             <TabButton tabName="overview">Overview</TabButton>
-            <TabButton tabName="assignments">Manage Assignments</TabButton>
+            {isManagerOrAdmin && <TabButton tabName="assignments">Manage Assignments</TabButton>}
         </nav>
       </div>
 
@@ -560,7 +559,7 @@ export const JobDetailsPage: React.FC<JobDetailsPageProps> = (props) => {
                 </div>
                  <div>
                     <h2 className="text-2xl font-bold mb-4 text-gray-200">Products ({products.length} items)</h2>
-                    <AddProductForm jobId={job.id} onAddProduct={onAddProduct} />
+                    {isManagerOrAdmin && <AddProductForm jobId={job.id} onAddProduct={onAddProduct} />}
                     <ProductListTable
                         products={products}
                         currentUser={currentUser}
@@ -571,7 +570,7 @@ export const JobDetailsPage: React.FC<JobDetailsPageProps> = (props) => {
                 </div>
             </div>
         )}
-        {activeTab === 'assignments' && (
+        {activeTab === 'assignments' && isManagerOrAdmin && (
             <AssignmentManager
                 job={job}
                 productionStages={productionStages}

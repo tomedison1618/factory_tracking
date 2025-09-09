@@ -243,6 +243,35 @@ export const DashboardPage: React.FC<DashboardPageProps> = (props) => {
     }, [currentUser, products, stageEvents, productStageLinks, productionStages, jobAssignments, jobs]);
     console.log('pendingWork:', pendingWork);
 
+    const activeBatch = useMemo((): PendingWorkItem[] => {
+        if (currentUser.role !== UserRole.TECHNICIAN) {
+            return [];
+        }
+
+        const activeProducts = products.filter(p => p.status === 'In Progress' && p.currentWorkerId === currentUser.id);
+        
+        const workItems: PendingWorkItem[] = [];
+
+        for (const product of activeProducts) {
+            const productLinks = productStageLinks.filter(l => l.productId === product.id);
+            const linkIds = productLinks.map(l => l.id);
+            
+            const latestStartedEvent = stageEvents
+                .filter(e => linkIds.includes(e.productStageLinkId) && e.status === StageEventStatus.STARTED)
+                .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
+
+            if (!latestStartedEvent) continue;
+
+            const currentLink = productLinks.find(l => l.id === latestStartedEvent.productStageLinkId)!;
+            const currentStageId = currentLink.productionStageId;
+            const currentStage = productionStages.find(s => s.id === currentStageId)!;
+            const job = jobs.find(j => j.id === product.jobId)!;
+
+            workItems.push({ product, job, stage: currentStage });
+        }
+        return workItems.sort((a, b) => a.job.dueDate.localeCompare(b.job.dueDate));
+    }, [currentUser, products, stageEvents, productStageLinks, productionStages, jobs]);
+
      const reviewWork = useMemo((): ReviewWorkItem[] => {
         const failedProducts = products.filter(p => p.status === 'Failed');
         const isManagerOrAdmin = currentUser.role === UserRole.MANAGER || currentUser.role === UserRole.ADMIN;
@@ -452,10 +481,45 @@ export const DashboardPage: React.FC<DashboardPageProps> = (props) => {
                     </div>
                 </div>
             )}
+
+            {/* My Active Batch Section (Technician Only) */}
+            {currentUser.role === UserRole.TECHNICIAN && activeBatch.length > 0 && (
+                <div id="active-batch-section" className="bg-gray-800 rounded-xl shadow-lg">
+                    <h2 className="text-xl font-bold p-4 border-b border-gray-700 text-blue-300">
+                        My Active Batch ({activeBatch.length})
+                    </h2>
+                    <div className="overflow-y-auto">
+                        <table className="min-w-full text-left text-sm text-gray-300">
+                            <thead className="bg-gray-700/50 text-xs text-gray-400 uppercase tracking-wider sticky top-0">
+                                <tr>
+                                    <th scope="col" className="px-6 py-3">Serial Number</th>
+                                    <th scope="col" className="px-6 py-3">Job</th>
+                                    <th scope="col" className="px-6 py-3">Working on Stage</th>
+                                    <th scope="col" className="px-6 py-3">Product Type</th>
+                                    <th scope="col" className="px-6 py-3">Due</th>
+                                    <th scope="col" className="px-6 py-3">Priority</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-700">
+                                {activeBatch.map(item => (
+                                    <tr key={item.product.id} className="hover:bg-gray-700/50 transition-colors duration-200 cursor-pointer" onClick={(e) => handleWorkItemClick(e, item)}>
+                                        <td className="px-6 py-3 font-mono text-cyan-400">{item.product.serialNumber}</td>
+                                        <td className="px-6 py-3">{item.job.docketNumber}</td>
+                                        <td className="px-6 py-3">{item.stage.stageName}</td>
+                                        <td className="px-6 py-3">{item.job.productType.typeName}</td>
+                                        <td className="px-6 py-3"><DueDateIndicator dueDate={item.job.dueDate} /></td>
+                                        <td className="px-6 py-3"><PriorityBadge priority={item.job.priority} /></td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
             
-            <div className="grid grid-cols-1 xl:grid-cols-5 gap-8">
+            <div className="space-y-8">
                 {/* My Work Queue Section */}
-                <div id="work-queue-section" className="xl:col-span-3 flex flex-col bg-gray-800 rounded-xl shadow-lg overflow-hidden">
+                <div id="work-queue-section" className="flex flex-col bg-gray-800 rounded-xl shadow-lg overflow-hidden">
                     <h2 className="text-xl font-bold p-4 border-b border-gray-700">My Work Queue ({pendingWork.length})</h2>
                     <div className="overflow-y-auto">
                         <table className="min-w-full text-left text-sm text-gray-300">
@@ -485,7 +549,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = (props) => {
                 </div>
 
                 {/* Active Jobs Section */}
-                <div id="active-jobs-section" className="xl:col-span-2 flex flex-col bg-gray-800 rounded-xl shadow-lg overflow-hidden">
+                <div id="active-jobs-section" className="flex flex-col bg-gray-800 rounded-xl shadow-lg overflow-hidden">
                     <h2 className="text-xl font-bold p-4 border-b border-gray-700">Active Jobs ({activeJobsWithDetails.length})</h2>
                     <div className="overflow-y-auto">
                          {activeJobsWithDetails.length > 0 ? (

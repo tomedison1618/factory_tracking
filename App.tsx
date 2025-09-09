@@ -33,45 +33,28 @@ const App: React.FC = () => {
   const [productTypes, setProductTypes] = useState<ProductType[]>([]);
   const [productionStages, setProductionStages] = useState<ProductionStage[]>([]);
 
-  useEffect(() => {
-    fetch('http://localhost:3001/api/jobs')
-      .then(res => res.json())
-      .then(data => setJobs(data));
+  const [isLoading, setIsLoading] = useState(true);
 
-    fetch('http://localhost:3001/api/users')
-      .then(res => res.json())
-      .then(data => setUsers(data));
-
-    fetch('http://localhost:3001/api/production-stages')
-      .then(res => res.json())
-      .then(data => setProductionStages(data));
-
-    fetch('http://localhost:3001/api/product-types')
-      .then(res => res.json())
-      .then(data => setProductTypes(data));
-
-    fetch('http://localhost:3001/api/job-assignments')
-      .then(res => res.json())
-      .then(data => setJobAssignments(data));
-
-    fetch('http://localhost:3001/api/job-stage-statuses')
-      .then(res => res.json())
-      .then(data => setJobStageStatuses(data));
-
-    fetch('http://localhost:3001/api/products')
-      .then(res => res.json())
-      .then(data => setProducts(data));
-
-    fetch('http://localhost:3001/api/product-stage-links')
-      .then(res => res.json())
-      .then(data => setProductStageLinks(data));
-
-    fetch('http://localhost:3001/api/stage-events')
-      .then(res => res.json())
-      .then(data => setStageEvents(data));
-
-  }, []);
-
+  const fetchAppData = async () => {
+    try {
+      const response = await fetch('http://localhost:3001/api/app-data');
+      const data = await response.json();
+      setJobs(data.jobs);
+      setUsers(data.users);
+      setProductionStages(data.productionStages);
+      setProductTypes(data.productTypes);
+      setJobAssignments(data.jobAssignments);
+      setJobStageStatuses(data.jobStageStatuses);
+      setProducts(data.products);
+      setProductStageLinks(data.productStageLinks);
+      setStageEvents(data.stageEvents);
+    } catch (error) {
+      console.error("Failed to fetch app data", error);
+      // Handle error appropriately, maybe show a global error message
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // Centralized Job Completion Logic
   useEffect(() => {
@@ -113,19 +96,45 @@ const App: React.FC = () => {
     };
   }, []);
   
-  const handleLogin = (username: string, password_provided: string) => {
-    const user = users.find(u => u.username.toLowerCase() === username.toLowerCase());
-    if (user && user.password === password_provided) {
+  const handleLogin = async (username: string, password_provided: string) => {
+    try {
+      const response = await fetch('http://localhost:3001/api/users/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ username: username, password: password_provided }),
+      });
+
+      if (response.ok) {
+        const user = await response.json();
         setCurrentUser(user);
         setLoginError(null);
+        setIsLoading(true);
+        await fetchAppData();
         window.location.hash = '#/'; // Redirect to dashboard on successful login
-    } else {
-        setLoginError('Invalid username or password.');
+      } else {
+        const errorText = await response.text();
+        setLoginError(errorText || 'Invalid username or password.');
+      }
+    } catch (error) {
+      console.error('Login failed:', error);
+      setLoginError('An unexpected error occurred. Please try again.');
     }
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
+    // Clear all data on logout
+    setJobs([]);
+    setUsers([]);
+    setProductionStages([]);
+    setProductTypes([]);
+    setJobAssignments([]);
+    setJobStageStatuses([]);
+    setProducts([]);
+    setProductStageLinks([]);
+    setStageEvents([]);
     window.location.hash = '#/'; // Go to login page on logout
   };
 
@@ -193,402 +202,189 @@ const App: React.FC = () => {
     }
   };
 
-  const handleStartWork = (productIds: number[], stageId: number) => {
-      const startedProductIds = new Set(productIds);
-      const newStartedEvents: Omit<StageEvent, 'id'>[] = [];
-      const pendingEventIdsToRemove = new Set<number>();
-
-      // Step 1: Determine all changes needed based on current state, without mutating. 
-      for (const productId of productIds) {
-          const link = productStageLinks.find(l => l.productId === productId && l.productionStageId === stageId);
-          if (link) {
-              const pendingEvent = stageEvents.find(e => e.productStageLinkId === link.id && e.status === StageEventStatus.PENDING);
-              if (pendingEvent) {
-                  pendingEventIdsToRemove.add(pendingEvent.id);
-              }
-              newStartedEvents.push({
-                  productStageLinkId: link.id,
-                  status: StageEventStatus.STARTED,
-                  timestamp: new Date().toISOString(),
-                  userId: currentUser!.id,
-                  durationSeconds: Math.floor(Math.random() * (900 - 300 + 1) + 300) // Mock duration
-              });
-          }
-      }
-
-      // Step 2: Queue the state updates. They will be based on the latest state when processed by React. 
-      
-      // Update products to 'In Progress'
-      setProducts(prevProducts => prevProducts.map(p => {
-          if (startedProductIds.has(p.id)) {
-              return { ...p, status: 'In Progress', currentWorkerId: currentUser!.id };
-          }
-          return p;
-      }));
-
-      // Update events: remove old PENDING, add new STARTED
-      setStageEvents(prevEvents => {
-          // First, filter out the old events
-          const updatedEvents = prevEvents.filter(e => !pendingEventIdsToRemove.has(e.id));
-          
-          // Then, add the new events with correct IDs
-          let maxEventId = updatedEvents.length > 0 ? Math.max(...updatedEvents.map(e => e.id)) : 0;
-          const eventsToAdd = newStartedEvents.map(e => ({
-              ...e,
-              id: ++maxEventId,
-          }));
-          
-          return [...updatedEvents, ...eventsToAdd];
+  const handleStartWork = async (productIds: number[], stageId: number) => {
+    try {
+      const response = await fetch('http://localhost:3001/api/workstation/start', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ productIds, stageId, userId: currentUser!.id }),
       });
+
+      if (response.ok) {
+        await fetchAppData(); // Refresh all data
+      } else {
+        const errorText = await response.text();
+        alert(`Failed to start work: ${errorText}`);
+      }
+    } catch (error) {
+      console.error('Failed to start work:', error);
+      alert('An unexpected error occurred while starting work.');
+    }
   };
 
-  const handlePassProducts = (productIds: number[], stageId: number) => {
-    if (productIds.length === 0) return;
+  const handlePassProducts = async (productIds: number[], stageId: number) => {
+    try {
+      const response = await fetch('http://localhost:3001/api/workstation/pass', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ productIds, stageId, userId: currentUser!.id }),
+      });
 
-    const firstProduct = products.find(p => p.id === productIds[0]);
-    if (!firstProduct) return;
-
-    const job = jobs.find(j => j.id === firstProduct.jobId);
-    if (!job) return;
-
-    const stagesForProduct = productionStages
-        .filter(s => s.productTypeId === job.productType.id)
-        .sort((a, b) => a.sequenceOrder - b.sequenceOrder);
-
-    const currentStageIndex = stagesForProduct.findIndex(s => s.id === stageId);
-    if (currentStageIndex === -1) return;
-
-    const isLastStage = currentStageIndex === stagesForProduct.length - 1;
-    const nextStage = isLastStage ? null : stagesForProduct[currentStageIndex + 1];
-
-    // Create a transaction of state changes to apply together
-    let newEvents = [...stageEvents];
-    let newProducts = [...products];
-    let newJobStageStatuses = [...jobStageStatuses];
-    let newJobs = [...jobs];
-
-    // 1. Update Events
-    let maxEventId = Math.max(0, ...newEvents.map(e => e.id));
-    const eventsToAdd: StageEvent[] = [];
-    productIds.forEach(productId => {
-        const currentLink = productStageLinks.find(l => l.productId === productId && l.productionStageId === stageId);
-        if (currentLink) {
-            eventsToAdd.push({
-                id: ++maxEventId,
-                productStageLinkId: currentLink.id,
-                status: StageEventStatus.PASSED,
-                timestamp: new Date().toISOString(),
-                userId: currentUser!.id,
-            });
-        }
-        if (nextStage) {
-            const nextLink = productStageLinks.find(l => l.productId === productId && l.productionStageId === nextStage.id);
-            if (nextLink) {
-                eventsToAdd.push({
-                    id: ++maxEventId,
-                    productStageLinkId: nextLink.id,
-                    status: StageEventStatus.PENDING,
-                    timestamp: new Date().toISOString(),
-                    userId: currentUser!.id,
-                });
-            }
-        }
-    });
-    newEvents.push(...eventsToAdd);
-
-    // 2. Update Product Status
-    const passedProductIds = new Set(productIds);
-    newProducts = newProducts.map(p => {
-        if (passedProductIds.has(p.id)) {
-            return {
-                ...p,
-                status: isLastStage ? 'Completed' : 'Pending',
-                currentWorkerId: undefined,
-            };
-        }
-        return p;
-    });
-
-    // 3. Update Job Stage Statuses
-    newJobStageStatuses = newJobStageStatuses.map(s => {
-        // Find and update current stage
-        if (s.jobId === job.id && s.productionStageId === stageId) {
-            const newPassedCount = s.passedCount + productIds.length;
-            const didStageComplete = newPassedCount + s.scrappedCount >= job.quantity;
-            return {
-                ...s,
-                passedCount: newPassedCount,
-                status: didStageComplete ? 'Completed' : s.status,
-            };
-        }
-        // Find and update next stage
-        if (nextStage && s.jobId === job.id && s.productionStageId === nextStage.id) {
-            if (s.status === 'Pending') {
-                 return { ...s, status: 'In Progress' };
-            }
-        }
-        return s;
-    });
-
-    // 4. Determine the new currentStageId for the job based on the updated statuses
-    const updatedStatusesForJob = newJobStageStatuses.filter(s => s.jobId === job.id);
-    const inProgressStages = updatedStatusesForJob
-        .filter(s => s.status === 'In Progress')
-        .map(s => stagesForProduct.find(stage => stage.id === s.productionStageId)!) // Use '!' assuming stage will always be found
-        .filter(Boolean) // Filter out any potential nulls if the assumption is wrong
-        .sort((a, b) => b.sequenceOrder - a.sequenceOrder);
-
-    let newCurrentStageId = job.currentStageId;
-    if (inProgressStages.length > 0) {
-        newCurrentStageId = inProgressStages[0].id;
-    } else { // Fallback if nothing is in progress: find the first pending stage
-        const pendingStages = updatedStatusesForJob
-            .filter(s => s.status === 'Pending')
-            .map(s => stagesForProduct.find(stage => stage.id === s.productionStageId)!) // Use '!' assuming stage will always be found
-            .filter(Boolean) // Filter out any potential nulls
-            .sort((a, b) => a.sequenceOrder - b.sequenceOrder);
-        if (pendingStages.length > 0) {
-            newCurrentStageId = pendingStages[0].id;
-        }
+      if (response.ok) {
+        await fetchAppData(); // Refresh all data
+      } else {
+        const errorText = await response.text();
+        alert(`Failed to pass products: ${errorText}`);
+      }
+    } catch (error) {
+      console.error('Failed to pass products:', error);
+      alert('An unexpected error occurred while passing products.');
     }
-    
-    // 5. Update the Job
-    newJobs = newJobs.map(j => 
-        j.id === job.id ? { ...j, currentStageId: newCurrentStageId } : j
-    );
-
-    // 6. Commit all state changes
-    setStageEvents(newEvents);
-    setProducts(newProducts);
-    setJobStageStatuses(newJobStageStatuses);
-    setJobs(newJobs);
   };
   
-  const handleFailProduct = (productId: number, stageId: number, notes: string) => {
-        const product = products.find(p => p.id === productId);
-        if (!product) return;
+  const handleFailProduct = async (productId: number, stageId: number, notes: string) => {
+    try {
+      const response = await fetch('http://localhost:3001/api/workstation/fail', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ productId, stageId, userId: currentUser!.id, notes }),
+      });
 
-        const link = productStageLinks.find(l => l.productId === productId && l.productionStageId === stageId);
-        if(!link) return;
-        
-        handleCreateNewEvent(link.id, StageEventStatus.FAILED, notes);
-        
-        // Set product status to Failed, awaiting review
-        setProducts(prev => prev.map(p => p.id === productId ? { ...p, status: 'Failed', currentWorkerId: undefined } : p));
-        
-        // Update the failed count for the JobStageStatus
-        setJobStageStatuses(prevStatuses => prevStatuses.map(s => {
-            if (s.jobId === product.jobId && s.productionStageId === stageId) {
-                return { ...s, failedCount: s.failedCount + 1 };
-            }
-            return s;
-        }));
-  };
-
-  const handleReworkProduct = (productId: number) => {
-    const product = products.find(p => p.id === productId)!;
-    const job = jobs.find(j => j.id === product.jobId)!;
-    
-    const linksForProduct = productStageLinks.filter(l => l.productId === productId);
-    const linkIds = linksForProduct.map(l => l.id);
-    
-    const latestFailedEvent = stageEvents
-        .filter(e => linkIds.includes(e.productStageLinkId) && e.status === StageEventStatus.FAILED)
-        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
-    
-    if (!latestFailedEvent) return; 
-
-    const failedLink = linksForProduct.find(l => l.id === latestFailedEvent.productStageLinkId)!;
-    const failedStageId = failedLink.productionStageId;
-
-    const stagesForProduct = productionStages.filter(s => s.productTypeId === job.productType.id).sort((a,b) => a.sequenceOrder - b.sequenceOrder);
-    const failedStageIndex = stagesForProduct.findIndex(s => s.id === failedStageId);
-
-    if (failedStageIndex === 0) {
-        alert("Cannot rework at a previous stage because this is the first stage.");
-        return;
-    }
-
-    const previousStage = stagesForProduct[failedStageIndex - 1];
-    const previousStageLink = productStageLinks.find(l => l.productId === productId && l.productionStageId === previousStage.id)!;
-    
-    handleCreateNewEvent(failedLink.id, StageEventStatus.RESET, `Reworking at previous stage: ${previousStage.stageName}`);
-    handleCreateNewEvent(previousStageLink.id, StageEventStatus.PENDING);
-
-    // Update product status back to Pending
-    setProducts(prev => prev.map(p => p.id === productId ? { ...p, status: 'Pending' } : p));
-    
-    // Decrement failed count for the stage it failed at
-    setJobStageStatuses(prev => prev.map(s => {
-        if (s.jobId === product.jobId && s.productionStageId === failedStageId) {
-            return { ...s, failedCount: s.failedCount > 0 ? s.failedCount - 1 : 0 };
-        }
-        return s;
-    }));
-  };
-
-  const handleMoveProductToStage = (productId: number, targetStageId: number) => {
-      const product = products.find(p => p.id === productId)!;
-
-      const linksForProduct = productStageLinks.filter(l => l.productId === productId);
-      const linkIds = linksForProduct.map(l => l.id);
-
-      const latestFailedEvent = stageEvents
-          .filter(e => linkIds.includes(e.productStageLinkId) && e.status === StageEventStatus.FAILED)
-          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
-
-      if (!latestFailedEvent) return;
-
-      const failedLink = linksForProduct.find(l => l.id === latestFailedEvent.productStageLinkId)!;
-      const failedStageId = failedLink.productionStageId;
-      const targetStageLink = productStageLinks.find(l => l.productId === productId && l.productionStageId === targetStageId)!;
-      const targetStage = productionStages.find(s => s.id === targetStageId)!;
-      
-      handleCreateNewEvent(failedLink.id, StageEventStatus.RESET, `Manager moved product to stage: ${targetStage.stageName}`);
-      handleCreateNewEvent(targetStageLink.id, StageEventStatus.PENDING);
-      
-      // Update product status back to Pending
-      setProducts(prev => prev.map(p => p.id === productId ? { ...p, status: 'Pending' } : p));
-    
-      // Decrement failed count for the stage it failed at
-      setJobStageStatuses(prev => prev.map(s => {
-          if (s.jobId === product.jobId && s.productionStageId === failedStageId) {
-              return { ...s, failedCount: s.failedCount > 0 ? s.failedCount - 1 : 0 };
-          }
-          return s;
-      }));
-  };
-
-  const handleScrapProduct = (productId: number, notes: string) => {
-    const product = products.find(p => p.id === productId);
-    if (!product) return;
-
-    // Find the current stage of the product based on its latest event of any type
-    const productLinks = productStageLinks.filter(l => l.productId === productId);
-    const linkIds = productLinks.map(l => l.id);
-
-    const latestEvent = stageEvents
-        .filter(e => linkIds.includes(e.productStageLinkId))
-        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
-    
-    if (!latestEvent) {
-        alert("Cannot scrap product: its location in the workflow is unknown (no events found).");
-        return;
-    }
-    
-    const currentLink = productLinks.find(l => l.id === latestEvent.productStageLinkId)!;
-    const currentStageId = currentLink.productionStageId;
-
-    // Create the SCRAPPED event at its current location
-    handleCreateNewEvent(currentLink.id, StageEventStatus.SCRAPPED, notes);
-
-    const wasFailed = product.status === 'Failed';
-
-    // Update product status to Scrapped
-    setProducts(prev => prev.map(p => p.id === productId ? { ...p, status: 'Scrapped', currentWorkerId: undefined } : p));
-    
-    // Update the counts for the stage where it was scrapped
-    setJobStageStatuses(prev => prev.map(s => {
-        if (s.jobId === product.jobId && s.productionStageId === currentStageId) {
-            return {
-                ...s,
-                failedCount: wasFailed && s.failedCount > 0 ? s.failedCount - 1 : s.failedCount,
-                scrappedCount: s.scrappedCount + 1
-            };
-        }
-        return s;
-    }));
-  };
-
-  const handleCreateJob = (newJobData: Omit<Job, 'id' | 'status' | 'currentStageId' | 'assignedUserId'>) => {
-    const newId = jobs.length > 0 ? Math.max(...jobs.map(j => j.id)) + 1 : 1013;
-    const stagesForProductType = productionStages.filter(s => s.productTypeId === newJobData.productType.id);
-    const sortedStages = [...stagesForProductType].sort((a, b) => a.sequenceOrder - b.sequenceOrder);
-    const firstStage = sortedStages[0];
-    const firstTechnician = users.find(u => u.role === UserRole.TECHNICIAN);
-
-    const newJob: Job = {
-      ...newJobData,
-      id: newId,
-      status: 'Open',
-      currentStageId: firstStage.id,
-      assignedUserId: firstTechnician!.id,
-    };
-    
-    setJobs(prevJobs => [...prevJobs, newJob]);
-    
-    // --- Auto-generate products for the new job ---
-    const docketPrefix = newJob.docketNumber.split('-')[0];
-    let maxProductId = Math.max(0, ...products.map(p => p.id));
-    let maxLinkId = Math.max(0, ...productStageLinks.map(l => l.id));
-    let maxEventId = Math.max(0, ...stageEvents.map(e => e.id));
-    
-    const newProducts: Product[] = [];
-    const newLinks: ProductStageLink[] = [];
-    const newEvents: StageEvent[] = [];
-
-    for (let i = 1; i <= newJob.quantity; i++) {
-        const newProduct: Product = {
-            id: ++maxProductId,
-            jobId: newJob.id,
-            serialNumber: `${docketPrefix}-${i.toString().padStart(3, '0')}`,
-            status: 'Pending',
-        };
-        newProducts.push(newProduct);
-
-        // Create links and initial PENDING event for the first stage
-        sortedStages.forEach((stage, index) => {
-            const newLink: ProductStageLink = {
-                id: ++maxLinkId,
-                productId: newProduct.id,
-                productionStageId: stage.id
-            };
-            newLinks.push(newLink);
-
-            if(index === 0) {
-                const newEvent: StageEvent = {
-                    id: ++maxEventId,
-                    productStageLinkId: newLink.id,
-                    status: StageEventStatus.PENDING,
-                    timestamp: new Date().toISOString(),
-                    userId: currentUser!.id, // Or a system user
-                };
-                newEvents.push(newEvent);
-            }
-        });
-    }
-    setProducts(prevProducts => [...prevProducts, ...newProducts]);
-    setProductStageLinks(prev => [...prev, ...newLinks]);
-    setStageEvents(prev => [...prev, ...newEvents]);
-
-    // --- Auto-generate job stage statuses ---
-    let maxStatusId = Math.max(0, ...jobStageStatuses.map(s => s.id));
-    const newStatuses: JobStageStatus[] = sortedStages.map((stage, index) => ({
-      id: ++maxStatusId,
-      jobId: newJob.id,
-      productionStageId: stage.id,
-      status: index === 0 ? 'In Progress' : 'Pending',
-      passedCount: 0,
-      failedCount: 0,
-      scrappedCount: 0
-    }));
-    setJobStageStatuses(prevStatuses => [...prevStatuses, ...newStatuses]);
-
-    window.location.hash = `#/jobs/${newId}`;
-  };
-
-  const handleUpdateAssignments = (jobId: number, productionStageId: number, userId: number, isAssigned: boolean) => {
-    setJobAssignments(prev => {
-      if (isAssigned) {
-        // Add assignment
-        const newId = Math.max(0, ...prev.map(a => a.id)) + 1;
-        const newAssignment: JobAssignment = { id: newId, jobId, productionStageId, userId };
-        return [...prev, newAssignment];
+      if (response.ok) {
+        await fetchAppData(); // Refresh all data
       } else {
-        // Remove assignment
-        return prev.filter(a => !(a.jobId === jobId && a.productionStageId === productionStageId && a.userId === userId));
+        const errorText = await response.text();
+        alert(`Failed to fail product: ${errorText}`);
       }
-    });
+    } catch (error) {
+      console.error('Failed to fail product:', error);
+      alert('An unexpected error occurred while failing the product.');
+    }
+  };
+
+  const handleReworkProduct = async (productId: number) => {
+    try {
+      const response = await fetch('http://localhost:3001/api/workstation/rework', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ productId, userId: currentUser!.id }),
+      });
+
+      if (response.ok) {
+        await fetchAppData(); // Refresh all data
+      } else {
+        const errorText = await response.text();
+        alert(`Failed to rework product: ${errorText}`);
+      }
+    } catch (error) {
+      console.error('Failed to rework product:', error);
+      alert('An unexpected error occurred while reworking the product.');
+    }
+  };
+
+  const handleMoveProductToStage = async (productId: number, targetStageId: number) => {
+    try {
+      const response = await fetch('http://localhost:3001/api/workstation/move', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ productId, targetStageId, userId: currentUser!.id }),
+      });
+
+      if (response.ok) {
+        await fetchAppData(); // Refresh all data
+      } else {
+        const errorText = await response.text();
+        alert(`Failed to move product: ${errorText}`);
+      }
+    } catch (error) {
+      console.error('Failed to move product:', error);
+      alert('An unexpected error occurred while moving the product.');
+    }
+  };
+
+  const handleScrapProduct = async (productId: number, notes: string) => {
+    try {
+      const response = await fetch('http://localhost:3001/api/workstation/scrap', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ productId, userId: currentUser!.id, notes }),
+      });
+
+      if (response.ok) {
+        await fetchAppData(); // Refresh all data
+      } else {
+        const errorText = await response.text();
+        alert(`Failed to scrap product: ${errorText}`);
+      }
+    } catch (error) {
+      console.error('Failed to scrap product:', error);
+      alert('An unexpected error occurred while scrapping the product.');
+    }
+  };
+
+  const handleCreateJob = async (newJobData: Omit<Job, 'id' | 'status' | 'currentStageId' | 'assignedUserId'>) => {
+    try {
+      const response = await fetch('http://localhost:3001/api/jobs', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...newJobData,
+          productTypeId: newJobData.productType.id, // Pass the ID instead of the object
+        }),
+      });
+
+      if (response.ok) {
+        const newJob = await response.json();
+        await fetchAppData(); // Refresh all data
+        window.location.hash = `#/jobs/${newJob.id}`;
+      } else {
+        const errorText = await response.text();
+        alert(`Failed to create job: ${errorText}`);
+      }
+    } catch (error) {
+      console.error('Failed to create job:', error);
+      alert('An unexpected error occurred while creating the job.');
+    }
+  };
+
+  const handleUpdateAssignments = async (jobId: number, productionStageId: number, userId: number, isAssigned: boolean) => {
+    try {
+      const url = 'http://localhost:3001/api/job-assignments';
+      const method = isAssigned ? 'POST' : 'DELETE';
+      
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ jobId, productionStageId, userId }),
+      });
+
+      if (response.ok) {
+        // Refresh the job assignments specifically, or all app data for simplicity
+        await fetchAppData(); 
+      } else {
+        const errorText = await response.text();
+        alert(`Failed to update assignment: ${errorText}`);
+      }
+    } catch (error) {
+      console.error('Failed to update assignment:', error);
+      alert('An unexpected error occurred while updating the assignment.');
+    }
   };
 
   const handleUpdateJobPriority = (jobId: number, priority: number) => {
@@ -648,40 +444,68 @@ const App: React.FC = () => {
     setStageEvents(prev => [...prev, ...newEvents]);
   };
 
-  const handleAddStage = (productTypeId: number, newStageData: Omit<ProductionStage, 'id' | 'productTypeId'>) => {
-    setProductionStages(prev => {
-      const newId = Math.max(0, ...prev.map(s => s.id)) + 1;
-      const newStage: ProductionStage = {
-        ...newStageData,
-        id: newId,
-        productTypeId,
-      };
-      return [...prev, newStage];
-    });
-  };
+  const handleAddStage = async (productTypeId: number, newStageData: Omit<ProductionStage, 'id' | 'productTypeId'>) => {
+    try {
+      const response = await fetch('http://localhost:3001/api/production-stages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ...newStageData, productTypeId }),
+      });
 
-  const handleUpdateStage = (updatedStage: ProductionStage) => {
-    setProductionStages(prev => prev.map(stage => stage.id === updatedStage.id ? updatedStage : stage));
-  };
-
-  const handleDeleteStage = (stageId: number) => {
-    const completedJobUsingStage = jobs.find(job => {
-        if (job.status !== 'Completed') return false;
-        const stagesForJob = jobStageStatuses.filter(s => s.jobId === job.id);
-        return stagesForJob.some(s => s.productionStageId === stageId);
-    });
-
-    if (completedJobUsingStage) {
-        let alertMessage = `This stage cannot be deleted because it is part of the permanent workflow for at least one COMPLETED job.`;
-        alertMessage += `\n\nFor example, Job "${completedJobUsingStage.docketNumber}" was completed using this stage.`;
-        alertMessage += `\n\nTo protect the integrity of historical data, workflows for completed jobs are locked.`;
-        
-        alert(alertMessage);
-        return;
+      if (response.ok) {
+        await fetchAppData(); // Refresh all data
+      } else {
+        const errorText = await response.text();
+        alert(`Failed to add stage: ${errorText}`);
+      }
+    } catch (error) {
+      console.error('Failed to add stage:', error);
+      alert('An unexpected error occurred while adding the stage.');
     }
-      
+  };
+
+  const handleUpdateStage = async (updatedStage: ProductionStage) => {
+    try {
+      const response = await fetch(`http://localhost:3001/api/production-stages/${updatedStage.id}`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(updatedStage),
+        });
+
+      if (response.ok) {
+        await fetchAppData(); // Refresh all data
+      } else {
+        const errorText = await response.text();
+        alert(`Failed to update stage: ${errorText}`);
+      }
+    } catch (error) {
+      console.error('Failed to update stage:', error);
+      alert('An unexpected error occurred while updating the stage.');
+    }
+  };
+
+  const handleDeleteStage = async (stageId: number) => {
     if (window.confirm('Are you sure you want to delete this stage? This action cannot be undone.')) {
-        setProductionStages(prev => prev.filter(stage => stage.id !== stageId));
+      try {
+        const response = await fetch(`http://localhost:3001/api/production-stages/${stageId}`, {
+          method: 'DELETE',
+        });
+
+        if (response.ok) {
+          await fetchAppData(); // Refresh all data
+        } else {
+          const errorText = await response.text();
+          alert(`Failed to delete stage: ${errorText}`);
+        }
+      } catch (error) {
+        console.error('Failed to delete stage:', error);
+        alert('An unexpected error occurred while deleting the stage.');
+      }
     }
   };
   
@@ -697,13 +521,27 @@ const App: React.FC = () => {
     });
   };
 
-  const handleCreateProductType = (typeName: string, partNumber: string) => {
-    setProductTypes(prev => {
-        const newId = Math.max(0, ...prev.map(pt => pt.id)) + 1;
-        const newProductType: ProductType = { id: newId, typeName, partNumber };
-        return [...prev, newProductType];
-    });
-    window.location.hash = '#/product-types';
+  const handleCreateProductType = async (typeName: string, partNumber: string) => {
+    try {
+      const response = await fetch('http://localhost:3001/api/product-types', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ typeName, partNumber }),
+      });
+
+      if (response.ok) {
+        await fetchAppData(); // Refresh all data
+        window.location.hash = '#/product-types';
+      } else {
+        const errorText = await response.text();
+        alert(`Failed to create product type: ${errorText}`);
+      }
+    } catch (error) {
+      console.error('Failed to create product type:', error);
+      alert('An unexpected error occurred while creating the product type.');
+    }
   };
 
   const handleCreateUser = (newUser: Omit<User, 'id'>) => {
@@ -713,15 +551,26 @@ const App: React.FC = () => {
       });
   };
 
-  const handleUpdateUser = (updatedUser: User) => {
-      setUsers(prev => prev.map(u => {
-          if (u.id === updatedUser.id) {
-              // Keep the old password if a new one isn't provided
-              const password = updatedUser.password ? updatedUser.password : u.password;
-              return { ...updatedUser, password };
-          }
-          return u;
-      }));
+  const handleUpdateUser = async (updatedUser: User) => {
+    try {
+      const response = await fetch(`http://localhost:3001/api/users/${updatedUser.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updatedUser),
+      });
+
+      if (response.ok) {
+        await fetchAppData(); // Refresh all data
+      } else {
+        const errorText = await response.text();
+        alert(`Failed to update user: ${errorText}`);
+      }
+    } catch (error) {
+      console.error('Failed to update user:', error);
+      alert('An unexpected error occurred while updating the user.');
+    }
   };
 
   const handleDeleteUser = (userId: number) => {

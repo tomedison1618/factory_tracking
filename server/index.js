@@ -19,6 +19,10 @@ const productsRouter = require('./routes/products');
 const productStageLinksRouter = require('./routes/productStageLinks');
 
 const stageEventsRouter = require('./routes/stageEvents');
+const appDataRouter = require('./routes/appData');
+const workstationRouter = require('./routes/workstation');
+const aiRouter = require('./routes/ai');
+const reportsRouter = require('./routes/reports');
 
 const app = express();
 app.use(cors());
@@ -33,6 +37,11 @@ app.use('/api/job-stage-statuses', jobStageStatusesRouter);
 app.use('/api/products', productsRouter);
 app.use('/api/product-stage-links', productStageLinksRouter);
 app.use('/api/stage-events', stageEventsRouter);
+app.use('/api/app-data', appDataRouter);
+app.use('/api/workstation', workstationRouter);
+app.use('/api/ai', aiRouter);
+app.use('/api/reports', reportsRouter);
+app.use('/api/workstation/data', workstationRouter);
 
 app.get('/', (req, res) => {
   res.send('Server is running');
