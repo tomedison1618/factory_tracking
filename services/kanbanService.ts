@@ -55,22 +55,16 @@ export const getProductsByStageForJob = (
 export const createKanbanCard = (
     job: Job,
     userForCard: User,
-    allStages: ProductionStage[],
+    stage: ProductionStage,
     quantity: number,
     isWorking: boolean // Flag to determine text
 ): KanbanCardData => {
-  const stage = allStages.find(s => s.id === job.currentStageId);
-
-  if (!stage) {
-    throw new Error(`Could not find stage for job ${job.docketNumber}`);
-  }
-
   const quantityText = isWorking
     ? `(Working on: ${quantity})`
     : `(${quantity} items available)`;
 
   return {
-    id: `${job.id}-${userForCard.id}`,
+    id: `${job.id}-${userForCard.id}-${stage.id}`,
     title: job.docketNumber,
     content: `Product: ${job.productType.typeName} ${quantityText}`,
     priority: job.priority,
@@ -89,11 +83,11 @@ export const getActiveWorkerIdsForJob = (job: Job, allProducts: Product[]): numb
 };
 
 export const getPersonnelCentricData = (
-    jobs: Job[], 
-    stages: ProductionStage[], 
-    users: User[], 
-    products: Product[], 
-    productStageLinks: ProductStageLink[], 
+    jobs: Job[],
+    stages: ProductionStage[],
+    users: User[],
+    products: Product[],
+    productStageLinks: ProductStageLink[],
     stageEvents: StageEvent[],
     jobAssignments: JobAssignment[]
 ): KanbanColumnData[] => {
@@ -108,45 +102,77 @@ export const getPersonnelCentricData = (
   const columnMap = new Map<number, KanbanColumnData>(columns.map(col => [Number(col.id), col]));
 
   jobs.filter(j => j.status === 'Open').forEach(job => {
-    const activeWorkerIds = getActiveWorkerIdsForJob(job, products);
+    // Map of workerId to the stage they are working on for this job.
+    const activeWork = new Map<number, { stage: ProductionStage, quantity: number }>();
 
-    if (activeWorkerIds.length > 0) {
-        // Active work
-        activeWorkerIds.forEach(workerId => {
-            const column = columnMap.get(workerId);
-            const worker = users.find(u => u.id === workerId);
-            if (column && worker) {
-                const quantity = products.filter(p => p.jobId === job.id && p.status === 'In Progress' && p.currentWorkerId === workerId).length;
-                column.cards.push(createKanbanCard(job, worker, stages, quantity, true));
-            }
-        });
-    } else {
-        // Idle work
-        const assignmentsForStage = jobAssignments.filter(
-            a => a.jobId === job.id && a.productionStageId === job.currentStageId
-        );
+    const inProgressProducts = products.filter(p => p.jobId === job.id && p.status === 'In Progress' && p.currentWorkerId != null);
 
-        if (assignmentsForStage.length > 0) {
-            const productsByStage = getProductsByStageForJob(job.id, products, productStageLinks, stageEvents);
-            const quantity = productsByStage.get(job.currentStageId)?.length || 0;
+    for (const product of inProgressProducts) {
+        const workerId = product.currentWorkerId!;
+        const productLinks = productStageLinks.filter(l => l.productId === product.id);
+        const linkIds = new Set(productLinks.map(l => l.id));
+        const latestStartedEvent = stageEvents
+            .filter(e => linkIds.has(e.productStageLinkId) && e.status === StageEventStatus.STARTED)
+            .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
 
-            if (quantity > 0) {
-                assignmentsForStage.forEach(assignment => {
-                    const column = columnMap.get(assignment.userId);
-                    const assignedUser = users.find(u => u.id === assignment.userId);
-
-                    if (column && assignedUser) {
-                        column.cards.push(createKanbanCard(job, assignedUser, stages, quantity, false));
+        if (latestStartedEvent) {
+            const link = productLinks.find(l => l.id === latestStartedEvent.productStageLinkId);
+            if (link) {
+                const stage = stages.find(s => s.id === link.productionStageId);
+                if (stage) {
+                    if (activeWork.has(workerId)) {
+                        activeWork.get(workerId)!.quantity++;
+                    } else {
+                        activeWork.set(workerId, { stage, quantity: 1 });
                     }
-                });
+                }
             }
         }
     }
+
+    activeWork.forEach(({ stage, quantity }, workerId) => {
+        const column = columnMap.get(workerId);
+        const worker = users.find(u => u.id === workerId);
+        if (column && worker) {
+            column.cards.push(createKanbanCard(job, worker, stage, quantity, true));
+        }
+    });
+
+
+    // Idle work
+    const productsByStage = getProductsByStageForJob(job.id, products, productStageLinks, stageEvents);
+
+    productsByStage.forEach((productsAtStage, stageId) => {
+        const assignmentsForStage = jobAssignments.filter(
+            a => a.jobId === job.id && a.productionStageId === stageId
+        );
+        const quantity = productsAtStage.length;
+
+        if (quantity > 0) {
+            assignmentsForStage.forEach(assignment => {
+                // Avoid creating idle card if user is already actively working on this job
+                if (activeWork.has(assignment.userId)) return;
+
+                const column = columnMap.get(assignment.userId);
+                const assignedUser = users.find(u => u.id === assignment.userId);
+                const stage = stages.find(s => s.id === stageId);
+
+                if (column && assignedUser && stage) {
+                    column.cards.push(createKanbanCard(job, assignedUser, stage, quantity, false));
+                }
+            });
+        }
+    });
   });
-  
-  // Sort cards within each column by stage sequence
+
+  // Sort cards within each column by priority and then by stage sequence
   columns.forEach(column => {
-    column.cards.sort((a, b) => a.stage.sequenceOrder - b.stage.sequenceOrder);
+    column.cards.sort((a, b) => {
+        if (a.priority !== b.priority) {
+            return a.priority - b.priority;
+        }
+        return a.stage.sequenceOrder - b.stage.sequenceOrder
+    });
   });
 
   return columns;

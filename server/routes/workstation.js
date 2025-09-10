@@ -405,6 +405,149 @@ router.post('/scrap', async (req, res) => {
   }
 });
 
+router.post('/scan', async (req, res) => {
+  const { scanInput, stageId, userId } = req.body;
+  const connection = await db.getConnection();
+
+  if (!scanInput || !stageId || !userId) {
+    return res.status(400).send('scanInput, stageId, and userId are required');
+  }
+
+  try {
+    await connection.beginTransaction();
+
+    // 1. Find product by serial number
+    const [products] = await connection.query('SELECT * FROM products WHERE serialNumber = ?', [scanInput]);
+
+    if (products.length === 0) {
+      await connection.rollback();
+      return res.status(404).send(`Product with serial number ${scanInput} not found`);
+    }
+    const product = products[0];
+    const productId = product.id;
+    const jobId = product.jobId;
+
+    // 2. Find the product's current stage and status from the latest event
+    const [latestEvents] = await connection.query(`
+      SELECT se.status, psl.productionStageId
+      FROM stage_events se
+      JOIN product_stage_links psl ON se.productStageLinkId = psl.id
+      WHERE psl.productId = ?
+      ORDER BY se.timestamp DESC
+      LIMIT 1
+    `, [productId]);
+
+    if (latestEvents.length === 0) {
+        await connection.rollback();
+        return res.status(400).send(`Product ${scanInput} has no history.`);
+    }
+
+    const latestEvent = latestEvents[0];
+    const currentStageId = parseInt(stageId, 10);
+
+    // ACTION: START WORK
+    if (latestEvent.status === 'PENDING' && latestEvent.productionStageId === currentStageId) {
+        const [links] = await connection.query(
+            'SELECT id FROM product_stage_links WHERE productId = ? AND productionStageId = ?',
+            [productId, currentStageId]
+        );
+        if (links.length === 0) throw new Error(`No link for product ${productId} at stage ${currentStageId}`);
+        const linkId = links[0].id;
+
+        await connection.query(
+            'INSERT INTO stage_events (productStageLinkId, status, userId, timestamp) VALUES (?, ?, ?, NOW())',
+            [linkId, 'STARTED', userId]
+        );
+
+        await connection.query(
+            'UPDATE products SET status = ?, currentWorkerId = ? WHERE id = ?',
+            ['In Progress', userId, productId]
+        );
+
+        await connection.commit();
+        return res.status(200).json({ action: 'started', message: `Started work on product ${scanInput}` });
+    }
+    // ACTION: PASS WORK
+    else if (latestEvent.status === 'STARTED' && latestEvent.productionStageId === currentStageId) {
+        const [jobRows] = await connection.query('SELECT * FROM jobs WHERE id = ?', [jobId]);
+        const job = jobRows[0];
+        const productTypeId = job.productTypeId;
+
+        const [currentLinks] = await connection.query(
+            'SELECT id FROM product_stage_links WHERE productId = ? AND productionStageId = ?',
+            [productId, currentStageId]
+        );
+        if (currentLinks.length === 0) throw new Error(`No link for product ${productId} at stage ${currentStageId}`);
+        const currentLinkId = currentLinks[0].id;
+
+        await connection.query(
+            'INSERT INTO stage_events (productStageLinkId, status, userId, timestamp) VALUES (?, ?, ?, NOW())',
+            [currentLinkId, 'PASSED', userId]
+        );
+
+        const [stages] = await connection.query(
+            'SELECT id, sequenceOrder FROM production_stages WHERE productTypeId = ? ORDER BY sequenceOrder ASC',
+            [productTypeId]
+        );
+        const currentStageIndex = stages.findIndex(s => s.id === currentStageId);
+        const nextStage = currentStageIndex < stages.length - 1 ? stages[currentStageIndex + 1] : null;
+
+        let newProductStatus = 'Pending';
+        if (!nextStage) {
+            newProductStatus = 'Completed';
+        } else {
+            const [nextLinks] = await connection.query(
+                'SELECT id FROM product_stage_links WHERE productId = ? AND productionStageId = ?',
+                [productId, nextStage.id]
+            );
+            if (nextLinks.length === 0) throw new Error(`No link for product ${productId} at next stage ${nextStage.id}`);
+            const nextLinkId = nextLinks[0].id;
+            await connection.query(
+                'INSERT INTO stage_events (productStageLinkId, status, userId, timestamp) VALUES (?, ?, ?, NOW())',
+                [nextLinkId, 'PENDING', userId]
+            );
+        }
+
+        await connection.query(
+            'UPDATE products SET status = ?, currentWorkerId = NULL WHERE id = ?',
+            [newProductStatus, productId]
+        );
+
+        await connection.query(
+            'UPDATE job_stage_statuses SET passedCount = passedCount + 1 WHERE jobId = ? AND productionStageId = ?',
+            [jobId, currentStageId]
+        );
+
+        if (nextStage) {
+            await connection.query(
+                'UPDATE job_stage_statuses SET status = ? WHERE jobId = ? AND productionStageId = ? AND status = ?',
+                ['In Progress', jobId, nextStage.id, 'Pending']
+            );
+        }
+
+        const [productsInJob] = await connection.query('SELECT status FROM products WHERE jobId = ?', [jobId]);
+        const allProductsFinished = productsInJob.every(p => p.status === 'Completed' || p.status === 'Scrapped');
+        if (allProductsFinished) {
+            await connection.query('UPDATE jobs SET status = ? WHERE id = ?', ['Completed', jobId]);
+        }
+
+        await connection.commit();
+        return res.status(200).json({ action: 'passed', message: `Passed product ${scanInput}` });
+    }
+    else {
+        await connection.rollback();
+        return res.status(400).send(`Product ${scanInput} is in status '${latestEvent.status}' at stage ${latestEvent.productionStageId} and cannot be scanned at this station (stage ${currentStageId}).`);
+    }
+
+  } catch (error) {
+    await connection.rollback();
+    console.error('Error processing scan:', error);
+    res.status(500).send('Error processing scan: ' + error.message);
+  } finally {
+    connection.release();
+  }
+});
+
 // Get data for the workstation page (pending products and user's active batch)
 router.get('/data', async (req, res) => {
   const { jobId, stageId, userId } = req.query;

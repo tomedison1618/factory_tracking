@@ -239,7 +239,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = (props) => {
                 }
             }
         }
-        return workItems.sort((a, b) => a.job.dueDate.localeCompare(b.job.dueDate));
+        return workItems.sort((a, b) => (a.job.priority - b.job.priority) || a.job.dueDate.localeCompare(b.job.dueDate));
     }, [currentUser, products, stageEvents, productStageLinks, productionStages, jobAssignments, jobs]);
     console.log('pendingWork:', pendingWork);
 
@@ -269,7 +269,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = (props) => {
 
             workItems.push({ product, job, stage: currentStage });
         }
-        return workItems.sort((a, b) => a.job.dueDate.localeCompare(b.job.dueDate));
+        return workItems.sort((a, b) => (a.job.priority - b.job.priority) || a.job.dueDate.localeCompare(b.job.dueDate));
     }, [currentUser, products, stageEvents, productStageLinks, productionStages, jobs]);
 
      const reviewWork = useMemo((): ReviewWorkItem[] => {
@@ -300,7 +300,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = (props) => {
                 }
             }
         }
-        return workItems.sort((a, b) => a.job.dueDate.localeCompare(b.job.dueDate));
+        return workItems.sort((a, b) => (a.job.priority - b.job.priority) || a.job.dueDate.localeCompare(b.job.dueDate));
     }, [currentUser, products, stageEvents, productStageLinks, productionStages, jobs]);
     console.log('reviewWork:', reviewWork);
 
@@ -461,7 +461,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = (props) => {
                     <h2 className="text-xl font-bold p-4 border-b border-gray-700 text-yellow-300">
                         {currentUser.role === UserRole.TECHNICIAN ? 'Items Awaiting Rework' : 'Items Awaiting Review'} ({reviewWork.length})
                     </h2>
-                    <div className="p-4 space-y-4">
+                    <div className="p-4 space-y-4 h-96 overflow-y-auto">
                         {reviewWork.map(item => (
                             <div key={item.product.id} className="bg-gray-700/50 p-4 rounded-lg border-l-4 border-yellow-500 flex justify-between items-center">
                                 <div>
@@ -488,7 +488,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = (props) => {
                     <h2 className="text-xl font-bold p-4 border-b border-gray-700 text-blue-300">
                         My Active Batch ({activeBatch.length})
                     </h2>
-                    <div className="overflow-y-auto">
+                    <div className="overflow-y-auto h-96">
                         <table className="min-w-full text-left text-sm text-gray-300">
                             <thead className="bg-gray-700/50 text-xs text-gray-400 uppercase tracking-wider sticky top-0">
                                 <tr>
@@ -521,7 +521,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = (props) => {
                 {/* My Work Queue Section */}
                 <div id="work-queue-section" className="flex flex-col bg-gray-800 rounded-xl shadow-lg overflow-hidden">
                     <h2 className="text-xl font-bold p-4 border-b border-gray-700">My Work Queue ({pendingWork.length})</h2>
-                    <div className="overflow-y-auto">
+                    <div className="overflow-y-auto h-96">
                         <table className="min-w-full text-left text-sm text-gray-300">
                             <thead className="bg-gray-700/50 text-xs text-gray-400 uppercase tracking-wider sticky top-0">
                                 <tr>
