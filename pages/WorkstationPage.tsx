@@ -13,27 +13,80 @@ interface WorkstationPageProps {
     onFailProduct: (productId: number, stageId: number, notes: string) => void;
 }
 
+const failureOptions = [
+    "Component Malfunction",
+    "Assembly Error",
+    "Cosmetic Defect",
+    "Software Issue",
+    "Other", // removed "(please specify)" to make it a distinct option
+];
+
 const FailModal: React.FC<{ product: Product, onFail: (notes: string) => void, onCancel: () => void }> = ({ product, onFail, onCancel }) => {
-    const [notes, setNotes] = useState('');
+    const [selectedReasons, setSelectedReasons] = useState<string[]>([]);
+    const [details, setDetails] = useState('');
+
+    const handleReasonToggle = (reason: string) => {
+        setSelectedReasons(prev =>
+            prev.includes(reason)
+                ? prev.filter(r => r !== reason)
+                : [...prev, reason]
+        );
+    };
+
+    const handleFail = () => {
+        const notesPayload = {
+            reasons: selectedReasons,
+            details: details,
+        };
+        onFail(JSON.stringify(notesPayload));
+    };
+
+    const isOtherSelected = selectedReasons.includes("Other");
+
     return (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
             <div className="bg-gray-800 rounded-xl shadow-2xl p-8 w-full max-w-md">
                 <h2 className="text-xl font-bold mb-4 text-white">Report Failure</h2>
                 <p className="text-sm text-gray-400 mb-4">
-                    Please provide notes for failing product <span className="font-mono text-cyan-400">{product.serialNumber}</span>.
+                    Select all applicable failure reasons for product <span className="font-mono text-cyan-400">{product.serialNumber}</span>.
                 </p>
-                <textarea
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    rows={4}
-                    className="w-full bg-gray-700 border border-gray-600 text-white rounded-lg p-2 focus:ring-2 focus:ring-red-500 transition"
-                    placeholder="Describe the reason for failure..."
-                />
+                
+                <div className="space-y-2">
+                    <p className="block text-sm font-medium text-gray-300 mb-2">Failure Reasons</p>
+                    {failureOptions.map(reason => (
+                        <label key={reason} className="flex items-center space-x-3 p-2 rounded-lg hover:bg-gray-700/50 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={selectedReasons.includes(reason)}
+                                onChange={() => handleReasonToggle(reason)}
+                                className="h-5 w-5 rounded bg-gray-600 border-gray-500 text-red-500 focus:ring-red-600"
+                            />
+                            <span className="text-white">{reason}</span>
+                        </label>
+                    ))}
+                </div>
+
+                {(isOtherSelected || details) && (
+                    <div className="mt-4">
+                        <label htmlFor="failure-details" className="block text-sm font-medium text-gray-300 mb-2">
+                            {isOtherSelected ? "Please specify 'Other' reason" : "Additional Notes (Optional)"}
+                        </label>
+                        <textarea
+                            id="failure-details"
+                            value={details}
+                            onChange={(e) => setDetails(e.target.value)}
+                            rows={3}
+                            className="w-full bg-gray-700 border border-gray-600 text-white rounded-lg p-2 focus:ring-2 focus:ring-red-500 transition"
+                            placeholder={isOtherSelected ? "Specify the reason for failure..." : "Add any extra details..."}
+                        />
+                    </div>
+                )}
+
                 <div className="flex justify-end space-x-4 mt-6">
                     <button onClick={onCancel} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg transition-colors">Cancel</button>
                     <button
-                        onClick={() => onFail(notes)}
-                        disabled={!notes.trim()}
+                        onClick={handleFail}
+                        disabled={selectedReasons.length === 0 || (isOtherSelected && !details.trim())}
                         className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed"
                     >
                         Confirm Failure

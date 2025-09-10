@@ -20,15 +20,20 @@ const BarChart: React.FC<{ chartData: ChartData }> = ({ chartData }) => {
     const { labels, datasets } = chartData.data;
     const data = datasets[0].data; // Assuming single dataset for simplicity
 
+    if (data.length === 0) {
+        return <div className="text-center text-gray-500">No data to display</div>;
+    }
+
     const maxValue = Math.max(...data, 1);
-    const width = 500;
     const height = 300;
     const padding = { top: 20, right: 20, bottom: 50, left: 40 };
-    const chartWidth = width - padding.left - padding.right;
-    const chartHeight = height - padding.top - padding.bottom;
 
-    const barWidth = chartWidth / data.length * 0.7;
-    const barSpacing = chartWidth / data.length * 0.3;
+    const barWidth = 40;
+    const barSpacing = 20;
+    const chartWidth = data.length * (barWidth + barSpacing) - barSpacing;
+    const width = chartWidth + padding.left + padding.right;
+
+    const chartHeight = height - padding.top - padding.bottom;
 
     return (
         <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto" role="figure" aria-label={chartData.title}>
@@ -64,7 +69,7 @@ const BarChart: React.FC<{ chartData: ChartData }> = ({ chartData }) => {
                             />
                             <text
                                 x={x + barWidth / 2}
-                                y={chartHeight + 15}
+                                y={chartHeight + 20} // increased spacing for labels
                                 textAnchor="middle"
                                 fill="#d1d5db"
                                 fontSize="12"

@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Job, Product, StageEvent, ProductStageLink, StageEventStatus, User, UserRole, ProductionStage, ProductType } from '../types';
+import { ChartRenderer, ChartData } from '../components/ChartRenderer';
 
 interface JobReportRow {
     jobId: number;
@@ -372,6 +373,7 @@ export const ReportsPage: React.FC<{
 
         const failuresByStage = new Map<number, { name: string; count: number }>();
         const failuresByProductType = new Map<number, { name: string; count: number }>();
+        const failuresByReason = new Map<string, number>();
 
         detailedLog.forEach(log => {
             const stageEntry = failuresByStage.get(log.stageId) || { name: log.stageName, count: 0 };
@@ -381,13 +383,41 @@ export const ReportsPage: React.FC<{
             const productTypeEntry = failuresByProductType.get(log.productTypeId) || { name: log.productType, count: 0 };
             productTypeEntry.count++;
             failuresByProductType.set(log.productTypeId, productTypeEntry);
+
+            try {
+                const notes = JSON.parse(log.notes);
+                if (notes && Array.isArray(notes.reasons)) {
+                    notes.reasons.forEach((reason: string) => {
+                        failuresByReason.set(reason, (failuresByReason.get(reason) || 0) + 1);
+                    });
+                }
+            } catch (e) {
+                const reason = "Uncategorized";
+                failuresByReason.set(reason, (failuresByReason.get(reason) || 0) + 1);
+            }
         });
         
         const stageSummary = Array.from(failuresByStage.values()).sort((a, b) => b.count - a.count);
         const productTypeSummary = Array.from(failuresByProductType.values()).sort((a, b) => b.count - a.count);
+        const reasonSummary = Array.from(failuresByReason.entries())
+            .map(([name, count]) => ({ name, count }))
+            .sort((a, b) => b.count - a.count);
+
+        const reasonChartData: ChartData = {
+            type: 'pie',
+            title: 'Failure Analysis by Reason',
+            data: {
+                labels: reasonSummary.map(r => r.name),
+                datasets: [{
+                    label: 'Failure Count',
+                    data: reasonSummary.map(r => r.count),
+                }]
+            }
+        };
+
         const totalFailures = detailedLog.length;
 
-        return { detailedLog, stageSummary, productTypeSummary, totalFailures };
+        return { detailedLog, stageSummary, productTypeSummary, totalFailures, reasonSummary, reasonChartData };
     }, [jobs, products, stageEvents, productStageLinks, users, productionStages, startDate, endDate, failureStageFilter, failureProductTypeFilter]);
 
     const handleExportJobs = () => {
@@ -479,7 +509,7 @@ export const ReportsPage: React.FC<{
     };
 
     const SummaryCard: React.FC<{title: string, data: FailureSummaryItem[], total: number}> = ({ title, data, total }) => (
-        <div className="w-1/2 bg-gray-700/30 p-4 rounded-lg">
+        <div className="w-1/3 bg-gray-700/30 p-4 rounded-lg">
             <h3 className="font-bold text-gray-300 mb-3">{title}</h3>
             {total > 0 ? (
                 <ul className="space-y-3">
@@ -523,7 +553,7 @@ export const ReportsPage: React.FC<{
                 </nav>
             </div>
 
-            <div className="bg-gray-800 rounded-xl shadow-2xl p-6 flex-grow flex flex-col overflow-hidden">
+            <div className="bg-gray-800 rounded-xl shadow-2xl p-6 flex-grow flex flex-col overflow-auto">
                 {activeTab === 'completion' && (
                     <>
                         <h2 className="text-xl font-bold mb-4">Job Completion Report</h2>
@@ -699,7 +729,11 @@ export const ReportsPage: React.FC<{
                                 Export to Excel
                             </button>
                         </div>
+                        <div className="mb-6">
+                            {failureReportData.reasonSummary.length > 0 && <ChartRenderer chartData={failureReportData.reasonChartData} />}
+                        </div>
                         <div className="flex space-x-6 mb-6">
+                            <SummaryCard title="Failures by Reason" data={failureReportData.reasonSummary} total={failureReportData.totalFailures} />
                             <SummaryCard title="Failures by Stage" data={failureReportData.stageSummary} total={failureReportData.totalFailures} />
                             <SummaryCard title="Failures by Product Type" data={failureReportData.productTypeSummary} total={failureReportData.totalFailures} />
                         </div>
@@ -726,7 +760,19 @@ export const ReportsPage: React.FC<{
                                                 </td>
                                                 <td className="px-6 py-4">{row.stageName}</td>
                                                 <td className="px-6 py-4">{row.technician}</td>
-                                                <td className="px-6 py-4"><p className="max-w-xs truncate" title={row.notes}>{row.notes || '-'}</p></td>
+                                                <td className="px-6 py-4"><p className="max-w-xs truncate" title={row.notes}>{(() => {
+                                                    try {
+                                                        const parsed = JSON.parse(row.notes);
+                                                        return (
+                                                            <>
+                                                                <span className="font-semibold">{parsed.reasons.join(', ')}</span>
+                                                                {parsed.details && <span className="text-gray-400 italic"> - {parsed.details}</span>}
+                                                            </>
+                                                        )
+                                                    } catch (e) {
+                                                        return row.notes || '-';
+                                                    }
+                                                })()}</p></td>
                                             </tr>
                                         ))}
                                     </tbody>
