@@ -58,4 +58,40 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+router.post('/bulk', async (req, res) => {
+  const { stages, productTypeId } = req.body; // Expecting an array of stages and a productTypeId
+
+  if (!stages || !Array.isArray(stages) || stages.length === 0) {
+    return res.status(400).send('Stages array is required.');
+  }
+  if (!productTypeId) {
+    return res.status(400).send('productTypeId is required.');
+  }
+
+  const connection = await db.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const insertedStages = [];
+    for (const stage of stages) {
+      const { stageName, sequenceOrder } = stage;
+      const [result] = await connection.query(
+        'INSERT INTO production_stages (productTypeId, stageName, sequenceOrder) VALUES (?, ?, ?)',
+        [productTypeId, stageName, sequenceOrder]
+      );
+      insertedStages.push({ id: result.insertId, productTypeId, stageName, sequenceOrder });
+    }
+
+    await connection.commit();
+    res.status(201).json(insertedStages);
+  } catch (error) {
+    await connection.rollback();
+    console.error('Error bulk creating production stages:', error);
+    res.status(500).send('Error bulk creating production stages');
+  } finally {
+    connection.release();
+  }
+});
+
 module.exports = router;

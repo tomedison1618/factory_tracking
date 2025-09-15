@@ -509,16 +509,26 @@ const App: React.FC = () => {
     }
   };
   
-  const handleBulkAddStages = (productTypeId: number, newStages: Omit<ProductionStage, 'id' | 'productTypeId'>[]) => {
-    setProductionStages(prev => {
-        let maxId = Math.max(0, ...prev.map(s => s.id));
-        const stagesToAdd: ProductionStage[] = newStages.map(s => ({
-            ...s,
-            id: ++maxId,
-            productTypeId,
-        }));
-        return [...prev, ...stagesToAdd];
-    });
+  const handleBulkAddStages = async (productTypeId: number, newStages: Omit<ProductionStage, 'id' | 'productTypeId'>[]) => {
+    try {
+      const response = await fetch('http://localhost:3001/api/production-stages/bulk', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ stages: newStages, productTypeId }),
+      });
+
+      if (response.ok) {
+        await fetchAppData(); // Refresh all data
+      } else {
+        const errorText = await response.text();
+        alert(`Failed to bulk add stages: ${errorText}`);
+      }
+    } catch (error) {
+      console.error('Failed to bulk add stages:', error);
+      alert('An unexpected error occurred while bulk adding stages.');
+    }
   };
 
   const handleCreateProductType = async (typeName: string, partNumber: string) => {
@@ -532,8 +542,9 @@ const App: React.FC = () => {
       });
 
       if (response.ok) {
+        const newProductType = await response.json();
         await fetchAppData(); // Refresh all data
-        window.location.hash = '#/product-types';
+        window.location.hash = `#/product-types/${newProductType.id}`;
       } else {
         const errorText = await response.text();
         alert(`Failed to create product type: ${errorText}`);
