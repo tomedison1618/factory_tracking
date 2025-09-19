@@ -39,6 +39,15 @@ export interface Job {
   assignedUserId: number;
 }
 
+export interface CreateJobRequest {
+  docketNumber: string;
+  quantity: number;
+  priority: number;
+  dueDate: string;
+  productType: ProductType;
+  serialSuffixStart: string;
+}
+
 export interface Product {
   id: number;
   jobId: number;

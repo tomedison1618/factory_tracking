@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { formatStageEventNotes } from '../utils/formatStageEventNotes';
 import { Product, StageEvent, ProductStageLink, ProductionStage, User, StageEventStatus } from '../types';
 
 interface ProductTravelerPageProps {
@@ -109,6 +110,7 @@ export const ProductTravelerPage: React.FC<ProductTravelerPageProps> = ({ produc
                                     <ul className="divide-y divide-gray-700">
                                         {stageEvents.map(event => {
                                             const user = users.find(u => u.id === event.userId);
+                                            const formattedNotes = formatStageEventNotes(event.notes);
                                             return (
                                                 <li key={event.id} className="py-3">
                                                     <div className="flex items-center justify-between">
@@ -125,10 +127,12 @@ export const ProductTravelerPage: React.FC<ProductTravelerPageProps> = ({ produc
                                                             </div>
                                                         )}
                                                     </div>
-                                                    {event.notes && (
-                                                        <p className="mt-2 text-sm text-gray-400 pl-4 border-l-2 border-gray-600 italic">
-                                                            "{event.notes}"
-                                                        </p>
+                                                    {formattedNotes.length > 0 && (
+                                                        <div className="mt-2 text-sm text-gray-400 pl-4 border-l-2 border-gray-600 italic space-y-1">
+                                                            {formattedNotes.map((line, noteIndex) => (
+                                                                <p key={noteIndex}>{line}</p>
+                                                            ))}
+                                                        </div>
                                                     )}
                                                 </li>
                                             );
@@ -145,3 +149,4 @@ export const ProductTravelerPage: React.FC<ProductTravelerPageProps> = ({ produc
         </div>
     );
 };
+

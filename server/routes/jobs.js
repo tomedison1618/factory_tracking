@@ -28,8 +28,44 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const { docketNumber, quantity, productTypeId, priority, dueDate } = req.body;
+  const { docketNumber, quantity, productTypeId, priority, dueDate, serialSuffixStart } = req.body;
   const connection = await db.getConnection();
+
+  const trimmedDocket = typeof docketNumber === 'string' ? docketNumber.trim() : '';
+  if (!trimmedDocket) {
+    return res.status(400).send('Docket number is required');
+  }
+
+  const docketPrefix = trimmedDocket.split('-')[0] || trimmedDocket;
+
+  let rawSuffixStart = serialSuffixStart;
+  if (typeof rawSuffixStart === 'number') {
+    rawSuffixStart = rawSuffixStart.toString();
+  } else if (typeof rawSuffixStart === 'string') {
+    rawSuffixStart = rawSuffixStart.trim();
+  } else {
+    rawSuffixStart = '';
+  }
+
+  if (!rawSuffixStart) {
+    rawSuffixStart = '001';
+  }
+
+  if (!/^\d+$/.test(rawSuffixStart)) {
+    return res.status(400).send('serialSuffixStart must be a numeric value');
+  }
+
+  const suffixPadding = Math.max(3, rawSuffixStart.length);
+  const suffixSeed = parseInt(rawSuffixStart, 10);
+
+  if (Number.isNaN(suffixSeed)) {
+    return res.status(400).send('serialSuffixStart must be a valid number');
+  }
+
+  const numericQuantity = parseInt(quantity, 10);
+  if (!Number.isFinite(numericQuantity) || numericQuantity <= 0) {
+    return res.status(400).send('Quantity must be a positive integer');
+  }
 
   try {
     await connection.beginTransaction();
@@ -37,7 +73,7 @@ router.post('/', async (req, res) => {
     // 1. Create Job
     const [jobResult] = await connection.query(
       'INSERT INTO jobs (docketNumber, quantity, productTypeId, priority, dueDate, status) VALUES (?, ?, ?, ?, ?, ?)',
-      [docketNumber, quantity, productTypeId, priority, dueDate, 'Open']
+      [trimmedDocket, numericQuantity, productTypeId, priority, dueDate, 'Open']
     );
     const newJobId = jobResult.insertId;
 
@@ -54,8 +90,9 @@ router.post('/', async (req, res) => {
     const firstStageId = stages[0].id;
 
     // 3. Create Products, Links, and initial Events
-    for (let i = 1; i <= quantity; i++) {
-      const serialNumber = `${docketNumber}-${i.toString().padStart(3, '0')}`;
+    for (let i = 0; i < numericQuantity; i++) {
+      const suffixNumber = suffixSeed + i;
+      const serialNumber = `${docketPrefix}-${suffixNumber.toString().padStart(suffixPadding, '0')}`;
       const [productResult] = await connection.query(
         'INSERT INTO products (jobId, serialNumber, status) VALUES (?, ?, ?)',
         [newJobId, serialNumber, 'Pending']

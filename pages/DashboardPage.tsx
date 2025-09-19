@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { formatStageEventNotes } from '../utils/formatStageEventNotes';
 import { Job, ProductionStage, User, Product, JobAssignment, StageEvent, ProductStageLink, StageEventStatus, UserRole, JobStageStatus } from '../types';
 
 interface DashboardPageProps {
@@ -462,22 +463,31 @@ export const DashboardPage: React.FC<DashboardPageProps> = (props) => {
                         {currentUser.role === UserRole.TECHNICIAN ? 'Items Awaiting Rework' : 'Items Awaiting Review'} ({reviewWork.length})
                     </h2>
                     <div className="p-4 space-y-4 h-96 overflow-y-auto">
-                        {reviewWork.map(item => (
-                            <div key={item.product.id} className="bg-gray-700/50 p-4 rounded-lg border-l-4 border-yellow-500 flex justify-between items-center">
-                                <div>
-                                    <p className="font-mono text-lg text-cyan-400">{item.product.serialNumber}</p>
-                                    <p className="text-sm text-gray-400">Job: {item.job.docketNumber} | Failed at: {item.stage.stageName}</p>
-                                    {item.latestFailedEvent.notes && <p className="text-xs text-gray-300 italic mt-1 pl-2 border-l-2 border-gray-600">"{item.latestFailedEvent.notes}"</p>}
+                        {reviewWork.map(item => {
+                            const formattedNotes = formatStageEventNotes(item.latestFailedEvent.notes);
+                            return (
+                                <div key={item.product.id} className="bg-gray-700/50 p-4 rounded-lg border-l-4 border-yellow-500 flex justify-between items-center">
+                                    <div>
+                                        <p className="font-mono text-lg text-cyan-400">{item.product.serialNumber}</p>
+                                        <p className="text-sm text-gray-400">Job: {item.job.docketNumber} | Failed at: {item.stage.stageName}</p>
+                                        {formattedNotes.length > 0 && (
+                                            <div className="text-xs text-gray-300 italic mt-1 pl-2 border-l-2 border-gray-600 space-y-1">
+                                                {formattedNotes.map((line, noteIndex) => (
+                                                    <p key={noteIndex}>{line}</p>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="flex-shrink-0">
+                                        {(currentUser.role === UserRole.MANAGER || currentUser.role === UserRole.ADMIN) ? (
+                                            <ManagerReviewActions item={item} stages={productionStages} onMove={onMoveProductToStage} onScrap={setScrappingProduct} />
+                                        ) : (
+                                            <button onClick={() => onReworkProduct(item.product.id)} className="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-1 px-3 rounded-md text-xs transition-colors">Rework</button>
+                                        )}
+                                    </div>
                                 </div>
-                                <div className="flex-shrink-0">
-                                    {(currentUser.role === UserRole.MANAGER || currentUser.role === UserRole.ADMIN) ? (
-                                        <ManagerReviewActions item={item} stages={productionStages} onMove={onMoveProductToStage} onScrap={setScrappingProduct} />
-                                    ) : (
-                                        <button onClick={() => onReworkProduct(item.product.id)} className="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-1 px-3 rounded-md text-xs transition-colors">Rework</button>
-                                    )}
-                                </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 </div>
             )}

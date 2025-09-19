@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Job, ProductType } from '../types';
+import { Job, ProductType, CreateJobRequest } from '../types';
 
 interface CreateJobPageProps {
   productTypes: ProductType[];
-  onCreateJob: (jobData: Omit<Job, 'id' | 'status' | 'currentStageId' | 'assignedUserId'>) => void;
+  onCreateJob: (jobData: CreateJobRequest) => void;
   jobs: Job[];
 }
 
@@ -13,6 +13,8 @@ export const CreateJobPage: React.FC<CreateJobPageProps> = ({ productTypes, onCr
   const [quantity, setQuantity] = useState('');
   const [priority, setPriority] = useState('3');
   const [dueDate, setDueDate] = useState('');
+  const [serialSuffixStart, setSerialSuffixStart] = useState('001');
+  const [serialSuffixError, setSerialSuffixError] = useState('');
   const [docketError, setDocketError] = useState('');
 
   useEffect(() => {
@@ -24,15 +26,27 @@ export const CreateJobPage: React.FC<CreateJobPageProps> = ({ productTypes, onCr
     }
   }, [docketNumber, jobs]);
 
+  useEffect(() => {
+    const trimmedSuffix = serialSuffixStart.trim();
+    if (!trimmedSuffix) {
+        setSerialSuffixError('Product serial suffix is required.');
+    } else if (!/^\d+$/.test(trimmedSuffix)) {
+        setSerialSuffixError('Product serial suffix must contain only numbers.');
+    } else {
+        setSerialSuffixError('');
+    }
+  }, [serialSuffixStart]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (docketError) {
+    if (docketError || serialSuffixError) {
         return;
     }
       
     const trimmedDocket = docketNumber.trim();
-    if (!trimmedDocket || !productTypeId || !quantity || !dueDate) {
+    const trimmedSuffixStart = serialSuffixStart.trim();
+    if (!trimmedDocket || !productTypeId || !quantity || !dueDate || !trimmedSuffixStart) {
         alert('Please fill out all fields.');
         return;
     }
@@ -49,6 +63,7 @@ export const CreateJobPage: React.FC<CreateJobPageProps> = ({ productTypes, onCr
       priority: parseInt(priority, 10),
       dueDate,
       productType: selectedProductType,
+      serialSuffixStart: trimmedSuffixStart,
     });
   };
 
@@ -91,10 +106,26 @@ export const CreateJobPage: React.FC<CreateJobPageProps> = ({ productTypes, onCr
             </select>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div>
               <label htmlFor="quantity" className="block text-sm font-medium text-gray-300 mb-2">Quantity</label>
               <input type="number" id="quantity" value={quantity} onChange={e => setQuantity(e.target.value)} className="w-full bg-gray-700 border border-gray-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition" min="1" required />
+            </div>
+
+            <div>
+              <label htmlFor="serialSuffixStart" className="block text-sm font-medium text-gray-300 mb-2">Product Serial Start</label>
+              <input
+                type="text"
+                id="serialSuffixStart"
+                value={serialSuffixStart}
+                onChange={e => setSerialSuffixStart(e.target.value)}
+                className={`w-full bg-gray-700 border text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition ${serialSuffixError ? 'border-red-500 ring-red-500/50' : 'border-gray-600'}`}
+                inputMode="numeric"
+                pattern="\d*"
+                placeholder="001"
+                required
+              />
+              {serialSuffixError && <p className="mt-2 text-sm text-red-400">{serialSuffixError}</p>}
             </div>
 
             <div>
@@ -118,7 +149,7 @@ export const CreateJobPage: React.FC<CreateJobPageProps> = ({ productTypes, onCr
             </a>
             <button 
                 type="submit"
-                disabled={!!docketError} 
+                disabled={!!docketError || !!serialSuffixError} 
                 className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-colors duration-300 flex items-center disabled:bg-gray-500 disabled:cursor-not-allowed"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">

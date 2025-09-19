@@ -234,8 +234,11 @@ router.post('/rework', async (req, res) => {
     // 2. Find the product type and its stages
     const [jobRows] = await connection.query('SELECT productTypeId FROM jobs WHERE id = ?', [jobId]);
     const productTypeId = jobRows[0].productTypeId;
-    const [stages] = await connection.query('SELECT id, sequenceOrder FROM production_stages WHERE productTypeId = ? ORDER BY sequenceOrder ASC', [productTypeId]);
-    
+    const [stages] = await connection.query(
+      'SELECT id, stageName, sequenceOrder FROM production_stages WHERE productTypeId = ? ORDER BY sequenceOrder ASC',
+      [productTypeId]
+    );
+
     const failedStageIndex = stages.findIndex(s => s.id === failedStageId);
     if (failedStageIndex === 0) {
       await connection.rollback();
@@ -245,24 +248,38 @@ router.post('/rework', async (req, res) => {
 
     // 3. Create RESET event for the failed stage
     await connection.query(
-      'INSERT INTO stage_events (productStageLinkId, status, userId, notes, timestamp) VALUES (?, ?, ?, ?, NOW())',
+      "INSERT INTO stage_events (productStageLinkId, status, userId, notes, timestamp) VALUES (?, ?, ?, ?, NOW())",
       [failedLinkId, 'RESET', userId, `Reworking at previous stage: ${previousStage.stageName}`]
     );
 
     // 4. Create PENDING event for the previous stage
-    const [prevLinks] = await connection.query('SELECT id FROM product_stage_links WHERE productId = ? AND productionStageId = ?', [productId, previousStage.id]);
-    if (prevLinks.length === 0) throw new Error(`No link for product ${productId} at previous stage ${previousStage.id}`);
+    const [prevLinks] = await connection.query(
+      "SELECT id FROM product_stage_links WHERE productId = ? AND productionStageId = ?",
+      [productId, previousStage.id]
+    );
+    if (prevLinks.length === 0) {
+      throw new Error(`No link for product ${productId} at previous stage ${previousStage.id}`);
+    }
     const prevLinkId = prevLinks[0].id;
     await connection.query(
-      'INSERT INTO stage_events (productStageLinkId, status, userId, timestamp) VALUES (?, ?, ?, NOW())',
+      "INSERT INTO stage_events (productStageLinkId, status, userId, timestamp) VALUES (?, ?, ?, NOW())",
       [prevLinkId, 'PENDING', userId]
     );
 
     // 5. Update product status to Pending
-    await connection.query('UPDATE products SET status = \'Pending\' WHERE id = ?', [productId]);
+    await connection.query("UPDATE products SET status = 'Pending' WHERE id = ?", [productId]);
 
-    // 6. Decrement failedCount for the failed stage
-    await connection.query('UPDATE job_stage_statuses SET failedCount = failedCount - 1 WHERE jobId = ? AND productionStageId = ? AND failedCount > 0', [jobId, failedStageId]);
+    // 6. Re-open the previous stage in job_stage_statuses
+    await connection.query(
+      "UPDATE job_stage_statuses SET passedCount = GREATEST(passedCount - 1, 0), status = 'In Progress' WHERE jobId = ? AND productionStageId = ?",
+      [jobId, previousStage.id]
+    );
+
+    // 7. Decrement failedCount for the failed stage
+    await connection.query(
+      "UPDATE job_stage_statuses SET failedCount = failedCount - 1 WHERE jobId = ? AND productionStageId = ? AND failedCount > 0",
+      [jobId, failedStageId]
+    );
 
     await connection.commit();
     res.status(200).send('Product sent for rework successfully');
@@ -303,27 +320,66 @@ router.post('/move', async (req, res) => {
     }
     const failedEvent = failedEvents[0];
     const { productStageLinkId: failedLinkId, productionStageId: failedStageId, jobId } = failedEvent;
+    const targetStageIdNum = Number(targetStageId);
 
-    // 2. Create RESET event for the failed stage
-    await connection.query(
-      'INSERT INTO stage_events (productStageLinkId, status, userId, notes, timestamp) VALUES (?, ?, ?, ?, NOW())',
-      [failedLinkId, 'RESET', userId, `Manager moved product to another stage`]
+    // 2. Load stage metadata for the product type
+    const [jobRows] = await connection.query('SELECT productTypeId FROM jobs WHERE id = ?', [jobId]);
+    const productTypeId = jobRows[0].productTypeId;
+    const [stages] = await connection.query(
+      'SELECT id, stageName, sequenceOrder FROM production_stages WHERE productTypeId = ? ORDER BY sequenceOrder ASC',
+      [productTypeId]
     );
 
-    // 3. Create PENDING event for the target stage
-    const [targetLinks] = await connection.query('SELECT id FROM product_stage_links WHERE productId = ? AND productionStageId = ?', [productId, targetStageId]);
-    if (targetLinks.length === 0) throw new Error(`No link for product ${productId} at target stage ${targetStageId}`);
+    const failedStageIndex = stages.findIndex(s => s.id === failedStageId);
+    const targetStageIndex = stages.findIndex(s => s.id === targetStageIdNum);
+    if (targetStageIndex === -1) {
+      throw new Error(`Target stage ${targetStageId} is not valid for product ${productId}.`);
+    }
+
+    // 3. Create RESET event for the failed stage
+    await connection.query(
+      "INSERT INTO stage_events (productStageLinkId, status, userId, notes, timestamp) VALUES (?, ?, ?, ?, NOW())",
+      [failedLinkId, 'RESET', userId, 'Manager moved product to another stage']
+    );
+
+    // 4. Create PENDING event for the target stage
+    const [targetLinks] = await connection.query(
+      "SELECT id FROM product_stage_links WHERE productId = ? AND productionStageId = ?",
+      [productId, targetStageIdNum]
+    );
+    if (targetLinks.length === 0) {
+      throw new Error(`No link for product ${productId} at target stage ${targetStageId}`);
+    }
     const targetLinkId = targetLinks[0].id;
     await connection.query(
-      'INSERT INTO stage_events (productStageLinkId, status, userId, timestamp) VALUES (?, ?, ?, NOW())',
+      "INSERT INTO stage_events (productStageLinkId, status, userId, timestamp) VALUES (?, ?, ?, NOW())",
       [targetLinkId, 'PENDING', userId]
     );
 
-    // 4. Update product status to Pending
-    await connection.query('UPDATE products SET status = \'Pending\' WHERE id = ?', [productId]);
+    // 5. Update product status to Pending
+    await connection.query("UPDATE products SET status = 'Pending' WHERE id = ?", [productId]);
 
-    // 5. Decrement failedCount for the failed stage
-    await connection.query('UPDATE job_stage_statuses SET failedCount = failedCount - 1 WHERE jobId = ? AND productionStageId = ? AND failedCount > 0', [jobId, failedStageId]);
+    // 6. Reconcile job_stage_statuses for the target stage (and earlier stages when moving backward)
+    if (targetStageIndex < failedStageIndex) {
+      for (let idx = targetStageIndex; idx < failedStageIndex; idx++) {
+        const stageToAdjust = stages[idx];
+        await connection.query(
+          "UPDATE job_stage_statuses SET passedCount = GREATEST(passedCount - 1, 0), status = 'In Progress' WHERE jobId = ? AND productionStageId = ?",
+          [jobId, stageToAdjust.id]
+        );
+      }
+    } else {
+      await connection.query(
+        "UPDATE job_stage_statuses SET status = 'In Progress' WHERE jobId = ? AND productionStageId = ?",
+        [jobId, targetStageIdNum]
+      );
+    }
+
+    // 7. Decrement failedCount for the failed stage
+    await connection.query(
+      "UPDATE job_stage_statuses SET failedCount = failedCount - 1 WHERE jobId = ? AND productionStageId = ? AND failedCount > 0",
+      [jobId, failedStageId]
+    );
 
     await connection.commit();
     res.status(200).send('Product moved successfully');

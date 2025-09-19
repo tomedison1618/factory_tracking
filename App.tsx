@@ -15,7 +15,7 @@ import { ReportsPage } from './pages/ReportsPage';
 import { AIAssistantPage } from './pages/AIAssistantPage';
 import { UserManagementPage } from './pages/UserManagementPage';
 import { LoginPage } from './pages/LoginPage';
-import { Job, User, UserRole, JobAssignment, JobStageStatus, Product, ProductStageLink, StageEvent, ProductType, ProductionStage, StageEventStatus } from './types';
+import { Job, User, UserRole, JobAssignment, JobStageStatus, Product, ProductStageLink, StageEvent, ProductType, ProductionStage, StageEventStatus, CreateJobRequest } from './types';
 
 const getPath = () => window.location.hash.substring(1) || '/';
 
@@ -334,7 +334,9 @@ const App: React.FC = () => {
     }
   };
 
-  const handleCreateJob = async (newJobData: Omit<Job, 'id' | 'status' | 'currentStageId' | 'assignedUserId'>) => {
+  const handleCreateJob = async (newJobData: CreateJobRequest) => {
+    const { productType, serialSuffixStart, ...rest } = newJobData;
+
     try {
       const response = await fetch('http://localhost:3001/api/jobs', {
         method: 'POST',
@@ -342,8 +344,9 @@ const App: React.FC = () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          ...newJobData,
-          productTypeId: newJobData.productType.id, // Pass the ID instead of the object
+          ...rest,
+          productTypeId: productType.id,
+          serialSuffixStart,
         }),
       });
 

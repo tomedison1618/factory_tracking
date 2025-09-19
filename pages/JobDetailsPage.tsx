@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { formatStageEventNotes } from '../utils/formatStageEventNotes';
 import { Job, User, ProductionStage, JobAssignment, UserRole, JobStageStatus, Product, ProductStageLink, StageEvent, StageEventStatus } from '../types';
 
 interface JobDetailsPageProps {
@@ -375,6 +376,7 @@ const FailedProductReview: React.FC<{
                     const userWhoFailed = users.find(u => u.id === product.latestFailedEvent.userId);
                     const isManagerOrAdmin = currentUser.role === UserRole.MANAGER || currentUser.role === UserRole.ADMIN;
                     const canRework = currentUser.id === product.latestFailedEvent.userId;
+                    const formattedNotes = formatStageEventNotes(product.latestFailedEvent.notes);
 
                     return (
                         <div key={product.id} className="bg-gray-800 p-4 rounded-lg">
@@ -384,8 +386,12 @@ const FailedProductReview: React.FC<{
                                     <p className="text-xs text-gray-400">
                                         Failed by {userWhoFailed?.username || 'Unknown'} on {new Date(product.latestFailedEvent.timestamp).toLocaleString()}
                                     </p>
-                                    {product.latestFailedEvent.notes && (
-                                        <p className="mt-2 text-sm text-gray-300 pl-3 border-l-2 border-gray-600 italic">"{product.latestFailedEvent.notes}"</p>
+                                    {formattedNotes.length > 0 && (
+                                        <div className="mt-2 text-sm text-gray-300 pl-3 border-l-2 border-gray-600 italic space-y-1">
+                                            {formattedNotes.map((line, noteIndex) => (
+                                                <p key={noteIndex}>{line}</p>
+                                            ))}
+                                        </div>
                                     )}
                                 </div>
                                 <div className="flex-shrink-0">
@@ -583,3 +589,5 @@ export const JobDetailsPage: React.FC<JobDetailsPageProps> = (props) => {
     </div>
   );
 };
+
+
