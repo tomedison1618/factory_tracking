@@ -1,4 +1,3 @@
-
 export enum UserRole {
   ADMIN = 'Admin',
   MANAGER = 'Manager',
@@ -91,6 +90,7 @@ export interface ProductStageLink {
 export interface StageEvent {
     id: number;
     productStageLinkId: number;
+    productionStageId: number;
     status: StageEventStatus;
     notes?: string;
     timestamp: string;

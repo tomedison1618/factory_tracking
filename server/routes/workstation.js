@@ -204,11 +204,16 @@ router.post('/fail', async (req, res) => {
 });
 
 router.post('/rework', async (req, res) => {
-  const { productId, userId } = req.body;
+  const { productId, stageId, userId } = req.body;
   const connection = await db.getConnection();
 
   if (!productId || !userId) {
     return res.status(400).send('productId and userId are required');
+  }
+
+  const stageIdNum = stageId === undefined || stageId === null ? null : Number(stageId);
+  if (stageId !== undefined && stageId !== null && Number.isNaN(stageIdNum)) {
+    return res.status(400).send('stageId must be a valid number when provided.');
   }
 
   try {
@@ -229,7 +234,12 @@ router.post('/rework', async (req, res) => {
       throw new Error(`No FAILED event found for product ${productId} to rework.`);
     }
     const failedEvent = failedEvents[0];
-    const { productStageLinkId: failedLinkId, productionStageId: failedStageId, jobId } = failedEvent;
+    const { productStageLinkId: failedLinkId, productionStageId: failedStageId, jobId, userId: failedByUserId } = failedEvent;
+
+    if (stageIdNum !== null && failedStageId !== stageIdNum) {
+      await connection.rollback();
+      return res.status(400).send('The stageId provided does not match the stage where the product failed.');
+    }
 
     // 2. Find the product type and its stages
     const [jobRows] = await connection.query('SELECT productTypeId FROM jobs WHERE id = ?', [jobId]);
@@ -240,25 +250,35 @@ router.post('/rework', async (req, res) => {
     );
 
     const failedStageIndex = stages.findIndex(s => s.id === failedStageId);
+    if (failedStageIndex === -1) {
+      throw new Error(`Stage ${failedStageId} is not part of the product type workflow.`);
+    }
+
     if (failedStageIndex === 0) {
       await connection.rollback();
-      return res.status(400).send('Cannot rework product at the first stage.');
+      return res.status(400).send('Cannot rework product from the first production stage.');
     }
-    const previousStage = stages[failedStageIndex - 1];
+
+    if (failedByUserId !== null && failedByUserId !== userId) {
+      await connection.rollback();
+      return res.status(403).send('Only the technician who failed the product can send it for rework.');
+    }
+
+    const reworkStage = stages[failedStageIndex - 1];
 
     // 3. Create RESET event for the failed stage
     await connection.query(
       "INSERT INTO stage_events (productStageLinkId, status, userId, notes, timestamp) VALUES (?, ?, ?, ?, NOW())",
-      [failedLinkId, 'RESET', userId, `Reworking at previous stage: ${previousStage.stageName}`]
+      [failedLinkId, 'RESET', userId, `Reworking back to stage: ${reworkStage.stageName}`]
     );
 
     // 4. Create PENDING event for the previous stage
     const [prevLinks] = await connection.query(
       "SELECT id FROM product_stage_links WHERE productId = ? AND productionStageId = ?",
-      [productId, previousStage.id]
+      [productId, reworkStage.id]
     );
     if (prevLinks.length === 0) {
-      throw new Error(`No link for product ${productId} at previous stage ${previousStage.id}`);
+      throw new Error(`No link for product ${productId} at previous stage ${reworkStage.id}`);
     }
     const prevLinkId = prevLinks[0].id;
     await connection.query(
@@ -272,7 +292,7 @@ router.post('/rework', async (req, res) => {
     // 6. Re-open the previous stage in job_stage_statuses
     await connection.query(
       "UPDATE job_stage_statuses SET passedCount = GREATEST(passedCount - 1, 0), status = 'In Progress' WHERE jobId = ? AND productionStageId = ?",
-      [jobId, previousStage.id]
+      [jobId, reworkStage.id]
     );
 
     // 7. Decrement failedCount for the failed stage

@@ -14,7 +14,7 @@ interface JobDetailsPageProps {
   currentUser: User;
   stageEvents: StageEvent[];
   productStageLinks: ProductStageLink[];
-  onReworkProduct: (productId: number) => void;
+  onReworkProduct: (productId: number, stageId: number) => void;
   onMoveProductToStage: (productId: number, targetStageId: number) => void;
   onScrapProduct: (productId: number, notes: string) => void;
   onUpdateJobPriority: (jobId: number, priority: number) => void;
@@ -364,7 +364,7 @@ const FailedProductReview: React.FC<{
     stages: ProductionStage[];
     users: User[];
     currentUser: User;
-    onRework: (productId: number) => void;
+    onRework: (productId: number, stageId: number) => void;
     onMove: (productId: number, stageId: number) => void;
     onScrap: (product: Product) => void;
 }> = ({ products, stages, users, currentUser, onRework, onMove, onScrap }) => {
@@ -376,6 +376,9 @@ const FailedProductReview: React.FC<{
                     const userWhoFailed = users.find(u => u.id === product.latestFailedEvent.userId);
                     const isManagerOrAdmin = currentUser.role === UserRole.MANAGER || currentUser.role === UserRole.ADMIN;
                     const canRework = currentUser.id === product.latestFailedEvent.userId;
+                    const failedStageIndex = stages.findIndex(s => s.id === product.latestFailedEvent.productionStageId);
+                    const hasPreviousStage = failedStageIndex > 0;
+                    const previousStage = hasPreviousStage ? stages[failedStageIndex - 1] : null;
                     const formattedNotes = formatStageEventNotes(product.latestFailedEvent.notes);
 
                     return (
@@ -396,8 +399,13 @@ const FailedProductReview: React.FC<{
                                 </div>
                                 <div className="flex-shrink-0">
                                     {isManagerOrAdmin && <ManagerReviewActions product={product} stages={stages} onMove={onMove} onScrap={onScrap} />}
-                                    {!isManagerOrAdmin && canRework && (
-                                         <button onClick={() => onRework(product.id)} className="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-1 px-3 rounded-md text-xs transition-colors">Rework at Previous Stage</button>
+                                    {!isManagerOrAdmin && canRework && hasPreviousStage && (
+                                         <button onClick={() => onRework(product.id, product.latestFailedEvent.productionStageId)} className="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-1 px-3 rounded-md text-xs transition-colors">
+                                             Rework to {previousStage ? previousStage.stageName : "previous stage"}
+                                         </button>
+                                    )}
+                                    {!isManagerOrAdmin && canRework && !hasPreviousStage && (
+                                         <span className="text-xs text-gray-400 italic">Cannot rework from the first stage.</span>
                                     )}
                                 </div>
                             </div>
@@ -434,10 +442,8 @@ export const JobDetailsPage: React.FC<JobDetailsPageProps> = (props) => {
   };
 
   const failedProductsForReview = useMemo((): FailedProductInfo[] => {
-    // First, find all products with a 'Failed' status.
     const failedProducts = products.filter(p => p.status === 'Failed');
 
-    // Then, for each failed product, find its latest FAILED event to get the notes and user.
     return failedProducts.map(product => {
         const linksForProduct = productStageLinks.filter(l => l.productId === product.id);
         const linkIds = linksForProduct.map(l => l.id);
@@ -445,10 +451,11 @@ export const JobDetailsPage: React.FC<JobDetailsPageProps> = (props) => {
             .filter(e => linkIds.includes(e.productStageLinkId) && e.status === StageEventStatus.FAILED)
             .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
         
-        // This should always find an event if the status is 'Failed', but we add a fallback.
-        return { ...product, latestFailedEvent: latestFailedEvent! };
-    }).filter(p => p.latestFailedEvent); // Ensure we only include products where we found an event.
-  }, [products, productStageLinks, stageEvents]);
+        const productionStageId = productStageLinks.find(l => l.id === latestFailedEvent.productStageLinkId)!.productionStageId;
+
+        return { ...product, latestFailedEvent: { ...latestFailedEvent, productionStageId } };
+    }).filter(p => p.latestFailedEvent);
+}, [products, productStageLinks, stageEvents]);
 
   const TabButton: React.FC<{tabName: string; children: React.ReactNode}> = ({ tabName, children }) => {
     const isActive = activeTab === tabName;
@@ -554,7 +561,7 @@ export const JobDetailsPage: React.FC<JobDetailsPageProps> = (props) => {
                         stages={sortedStages}
                         users={users}
                         currentUser={currentUser}
-                        onRework={onReworkProduct}
+                        onRework={(productId, stageId) => onReworkProduct(productId, stageId)}
                         onMove={onMoveProductToStage}
                         onScrap={setScrappingProduct}
                     />
@@ -589,5 +596,3 @@ export const JobDetailsPage: React.FC<JobDetailsPageProps> = (props) => {
     </div>
   );
 };
-
-

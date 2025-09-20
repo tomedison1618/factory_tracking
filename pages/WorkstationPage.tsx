@@ -129,6 +129,31 @@ const WorkstationScanner: React.FC<{ onScan: (serialNumber: string) => void; }> 
     );
 };
 
+const getLatestEventForLink = (events: StageEvent[]): StageEvent | null => {
+    if (events.length === 0) {
+        return null;
+    }
+
+    return events.reduce((latest, event) => {
+        const latestTime = new Date(latest.timestamp).getTime();
+        const eventTime = new Date(event.timestamp).getTime();
+
+        if (eventTime > latestTime) {
+            return event;
+        }
+
+        if (eventTime === latestTime) {
+            const latestId = latest.id ?? 0;
+            const eventId = event.id ?? 0;
+            if (eventId > latestId) {
+                return event;
+            }
+        }
+
+        return latest;
+    }, events[0]);
+};
+
 export const WorkstationPage: React.FC<WorkstationPageProps> = ({
     job,
     stage,
@@ -145,57 +170,64 @@ export const WorkstationPage: React.FC<WorkstationPageProps> = ({
     const [failingProduct, setFailingProduct] = useState<Product | null>(null);
 
     const pendingProducts = useMemo(() => {
-        return products.filter(product => {
-            // Quick pre-filter: product must be globally pending.
-            if (product.status !== 'Pending') {
-                return false;
-            }
-
-            // Find the specific link for this product at this stage.
+        console.log("Recalculating pending products...");
+        const pending = products.filter(product => {
             const link = productStageLinks.find(l => l.productId === product.id && l.productionStageId === stage.id);
             if (!link) {
+                console.log(`Product ${product.serialNumber} has no link for stage ${stage.id}`);
                 return false;
             }
 
-            // Get all events for this specific product-stage link, sorted newest first.
-            const eventsForLink = stageEvents
-                .filter(e => e.productStageLinkId === link.id)
-                .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            const eventsForLink = stageEvents.filter(e => e.productStageLinkId === link.id);
             
             if (eventsForLink.length === 0) {
-                return false;
+                console.log(`Product ${product.serialNumber} has no events for link ${link.id}`);
+                return false; // No events for this product at this stage yet.
             }
 
-            // The latest event for this product AT THIS STAGE must be PENDING.
-            const latestEvent = eventsForLink[0];
-            return latestEvent.status === StageEventStatus.PENDING;
+            const latestEvent = getLatestEventForLink(eventsForLink);
+            if (!latestEvent) {
+                console.log(`Product ${product.serialNumber} has no determinable latest event at stage ${stage.id}`);
+                return false;
+            }
+            console.log(`Product ${product.serialNumber} latest event at stage ${stage.id}:`, latestEvent);
+
+            // A product is pending here if its latest action at this stage is PENDING.
+            // This handles cases where a product is moved back to this stage after failing later on.
+            const isPending = latestEvent.status === StageEventStatus.PENDING;
+            console.log(`Product ${product.serialNumber} is pending at stage ${stage.id}: ${isPending}`);
+            return isPending;
         });
+        console.log("Pending products:", pending);
+        return pending;
     }, [products, stage.id, productStageLinks, stageEvents]);
 
     const activeBatch = useMemo(() => {
-        // Pre-filter for performance.
-        const potentiallyActive = products.filter(p => p.status === 'In Progress' && p.currentWorkerId === currentUser.id);
-
-        return potentiallyActive.filter(product => {
+        console.log("Recalculating active batch...");
+        const active = products.filter(product => {
             // Find the specific link for this product at this stage.
             const link = productStageLinks.find(l => l.productId === product.id && l.productionStageId === stage.id);
             if (!link) {
                 return false;
             }
 
-            // Get all events related to this specific product-stage link, sorted newest first.
-            const eventsForLink = stageEvents
-                .filter(e => e.productStageLinkId === link.id)
-                .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            // Get all events related to this specific product-stage link.
+            const eventsForLink = stageEvents.filter(e => e.productStageLinkId === link.id);
 
             if (eventsForLink.length === 0) {
                 return false;
             }
 
             // The very last thing that happened to this product at this stage must be a "STARTED" event.
-            const latestEvent = eventsForLink[0];
-            return latestEvent.status === StageEventStatus.STARTED;
+            const latestEvent = getLatestEventForLink(eventsForLink);
+            if (!latestEvent) {
+                return false;
+            }
+            const isActive = latestEvent.status === StageEventStatus.STARTED && product.currentWorkerId === currentUser.id;
+            return isActive;
         });
+        console.log("Active batch:", active);
+        return active;
     }, [products, currentUser.id, stage.id, productStageLinks, stageEvents]);
 
     const toggleProductSelection = (productId: number) => {

@@ -13,7 +13,7 @@ interface DashboardPageProps {
     productStageLinks: ProductStageLink[];
     jobStageStatuses: JobStageStatus[];
     onSearch: (serialNumber: string) => void;
-    onReworkProduct: (productId: number) => void;
+    onReworkProduct: (productId: number, stageId: number) => void;
     onMoveProductToStage: (productId: number, targetStageId: number) => void;
     onScrapProduct: (productId: number, notes: string) => void;
 }
@@ -465,6 +465,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = (props) => {
                     <div className="p-4 space-y-4 h-96 overflow-y-auto">
                         {reviewWork.map(item => {
                             const formattedNotes = formatStageEventNotes(item.latestFailedEvent.notes);
+                            const stagesForProductType = productionStages
+                                .filter(s => s.productTypeId === item.job.productType.id)
+                                .sort((a, b) => a.sequenceOrder - b.sequenceOrder);
+                            const failedStageIndex = stagesForProductType.findIndex(s => s.id === item.stage.id);
+                            const hasPreviousStage = failedStageIndex > 0;
+                            const previousStage = hasPreviousStage ? stagesForProductType[failedStageIndex - 1] : null;
                             return (
                                 <div key={item.product.id} className="bg-gray-700/50 p-4 rounded-lg border-l-4 border-yellow-500 flex justify-between items-center">
                                     <div>
@@ -482,7 +488,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = (props) => {
                                         {(currentUser.role === UserRole.MANAGER || currentUser.role === UserRole.ADMIN) ? (
                                             <ManagerReviewActions item={item} stages={productionStages} onMove={onMoveProductToStage} onScrap={setScrappingProduct} />
                                         ) : (
-                                            <button onClick={() => onReworkProduct(item.product.id)} className="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-1 px-3 rounded-md text-xs transition-colors">Rework</button>
+                                            hasPreviousStage ? (
+                                                <button onClick={() => onReworkProduct(item.product.id, item.stage.id)} className="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-1 px-3 rounded-md text-xs transition-colors">
+                                                    Rework to {previousStage ? previousStage.stageName : "previous stage"}
+                                                </button>
+                                            ) : (
+                                                <span className="text-xs text-gray-400 italic">Cannot rework from the first stage.</span>
+                                            )
                                         )}
                                     </div>
                                 </div>

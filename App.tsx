@@ -268,14 +268,14 @@ const App: React.FC = () => {
     }
   };
 
-  const handleReworkProduct = async (productId: number) => {
+  const handleReworkProduct = async (productId: number, stageId: number) => {
     try {
       const response = await fetch('http://localhost:3001/api/workstation/rework', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ productId, userId: currentUser!.id }),
+        body: JSON.stringify({ productId, stageId, userId: currentUser!.id }),
       });
 
       if (response.ok) {
